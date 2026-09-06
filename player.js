@@ -20,11 +20,10 @@ function item(category, id, variant, count, extra, text) {
 function createPlayer(name) {
   const slots = [];
   for (let i = 0; i < 30; i++) slots.push(emptyItem());
-  // Starter loadout (matches recovered Free Dig defaults)
-  slots[0] = item(2, 326, 1, 1, 0, ''); // Mortar
-  slots[1] = item(2, 240, 0, 1, 0, ''); // Pickaxe
-  slots[2] = item(1, 100, 0, 24, 0, ''); // Grass
-  slots[3] = item(1, 108, 0, 40, 0, ''); // Dirt
+  slots[0] = item(2, 326, 1, 1, 0, '');
+  slots[1] = item(2, 240, 0, 1, 0, '');
+  slots[2] = item(1, 100, 0, 24, 0, '');
+  slots[3] = item(1, 108, 0, 40, 0, '');
 
   return {
     id: randomGuid(),
@@ -33,14 +32,18 @@ function createPlayer(name) {
     name: (name || 'Player').slice(0, 24),
     x: 12,
     y: 16,
-    appearance: [0, 0, 0, 0, 326, 0, 0, 0, 0, 0, 0],
+    appearance: [0, 247, 0, 0, 326, 0, 0, 0, 0, 0, 0],
     appearanceText: '',
+    skinScale: 1.44,
+    flagL0: 0,
     slots,
     coins: 0,
     hp: 3,
     maxHp: 3,
     ws: null,
     ready: false,
+    identityReceived: false,
+    profileReceived: false,
   };
 }
 
