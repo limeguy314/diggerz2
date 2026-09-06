@@ -105,6 +105,22 @@ const FORCE_HOST_INJECT = `
         if (!q.player.l9) q.player.l9 = 90;
         l.z39.l9 = 0.45 + 1.1 * (q.player.l9 || 90) / 100;
       }
+      // Auto-select pickaxe/tool so dig works
+      if (typeof l !== 'undefined' && l.z39 && l.z39.n38 && l.z39.n38.B30) {
+        var slots = l.z39.n38.B30;
+        var pick = -1, anyTool = -1;
+        for (var i = 0; i < slots.length; i++) {
+          var it = slots[i];
+          if (!it || !it.a4) continue;
+          if (it.a4 === 2 && it.h44 === 240) pick = i;
+          if (it.a4 === 2 && anyTool < 0) anyTool = i;
+        }
+        var want = pick >= 0 ? pick : anyTool;
+        if (want >= 0) {
+          l.z39.n38.q43 = want;
+          try { if (typeof K !== 'undefined' && K.a15) K.a15(want); } catch (e2) {}
+        }
+      }
     } catch (e) {}
     if (++n > 120) clearInterval(t);
   }, 250);
