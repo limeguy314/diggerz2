@@ -53,6 +53,7 @@ class Room {
         this.readProfile(player, packet);
         if (player.ready) this.pushLoadout(ws, player);
         break;
+      case 250: this.adminCommand(ws, player, packet); break;
       case 287: this.digOrAttack(ws, player, packet); break;
     }
   }
@@ -74,7 +75,6 @@ class Room {
         player.name = String(name).trim().slice(0, 24);
       if (isFinite(skinScale) && skinScale > 0.2 && skinScale < 3) player.skinScale = skinScale;
       player.flagL0 = flagL0 | 0;
-      console.log('identity', player.name, player.skinScale);
     } catch (e) {}
   }
   readProfile(player, packet) {
@@ -104,7 +104,6 @@ class Room {
       player.selectedSlot = pick >= 0 ? pick : 0;
       player.slots = slots;
       player.profileReceived = true;
-      console.log('profile', player.name, 'slots', slotCount);
     } catch (e) { console.error('profile', e.message); }
   }
   pushLoadout(ws, player) {
@@ -207,7 +206,6 @@ class Room {
     });
   }
   sendAccess(ws) {
-    // Opcode 143 -> X31 sets l.a44 / l.a45 (dig + build). Opcode 8 is NOT access.
     this.send(ws, 143, 1, (p) => { p.s0(true); p.s0(true); });
   }
   sendCoins(ws, player) { this.send(ws, 17, 1, (p) => p.R0(player.coins | 0)); }
@@ -373,6 +371,85 @@ class Room {
         setTile(this.world, tx, ty, 0);
         this.sendTile(tx, ty, 0);
         if (++broken >= 4) break;
+      }
+    }
+  }
+  adminCommand(ws, player, packet) {
+    let text = '';
+    try { text = packet.r5(); } catch (e) { return; }
+    let data;
+    try { data = JSON.parse(text); } catch (e) { return; }
+    if (!data || !data.op) return;
+    player.adminAuthed = true;
+    switch (data.op) {
+      case 'give': {
+        const category = data.category | 0;
+        const id = data.id | 0;
+        const count = Math.max(1, Math.min(999, data.count | 0));
+        if ((category !== 1 && category !== 2) || id <= 0) break;
+        let placed = false;
+        for (let i = 0; i < player.slots.length; i++) {
+          const s = player.slots[i];
+          if (s.category === category && s.id === id) {
+            s.count = Math.min(999, (s.count || 0) + count);
+            placed = true;
+            break;
+          }
+        }
+        if (!placed) {
+          for (let i = 0; i < player.slots.length; i++) {
+            if (!player.slots[i].count) {
+              player.slots[i] = item(category, id, 0, count, 0, '');
+              placed = true;
+              break;
+            }
+          }
+        }
+        this.sendInventory(ws, player);
+        this.message(ws, '^2Admin: gave item ' + id + ' x' + count);
+        break;
+      }
+      case 'coins': {
+        const amount = Math.max(1, Math.min(1000000, data.amount | 0));
+        player.coins = (player.coins || 0) + amount;
+        this.sendCoins(ws, player);
+        this.message(ws, '^2Admin: +' + amount + ' coins (total ' + player.coins + ')');
+        break;
+      }
+      case 'kill': {
+        const name = String(data.name || '');
+        for (const p of this.players.values()) {
+          if (!name || p.name === name) {
+            p.x = 12;
+            p.y = this.world.surface - 2;
+            if (p.ws) {
+              this.sendPlayer(p.ws, p);
+              this.message(p.ws, '^1Admin kill — respawned');
+            }
+            if (name) break;
+          }
+        }
+        break;
+      }
+      case 'tp': {
+        const name = String(data.name || '');
+        let target = player;
+        for (const p of this.players.values()) {
+          if (p.name === name) { target = p; break; }
+        }
+        player.x = target.x;
+        player.y = target.y;
+        this.sendPlayer(ws, player);
+        this.broadcastMovement(player, null);
+        this.message(ws, '^2Admin: teleported to ' + target.name);
+        break;
+      }
+      case 'pvp': {
+        this.pvpEnabled = !!data.enabled;
+        for (const p of this.players.values()) {
+          if (p.ws) this.message(p.ws, this.pvpEnabled ? '^1ADMIN: PVP ENABLED' : '^2ADMIN: PVP SAFE');
+        }
+        break;
       }
     }
   }
