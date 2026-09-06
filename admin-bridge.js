@@ -33,6 +33,9 @@
     _owner: false,
     _lime: false,
     adminPvpEnabled: false,
+    status: function () {
+      return 'online admin bridge · ready';
+    },
     adminAuthorizeOwner: function () { this._owner = true; return true; },
     adminAuthorizeLime: function () { this._lime = true; return true; },
     adminIsOwnerAuthorized: function () { return !!this._owner; },
@@ -123,8 +126,10 @@
   var n = 0;
   var t = setInterval(function () {
     try {
-      if (window.DiggerzOnlineAdmin && window.Main)
-        window.Main.diggerzService = window.DiggerzOnlineAdmin;
+      if (!window.DiggerzOnlineAdmin || !window.Main) return;
+      var cur = window.Main.diggerzService;
+      if (cur && typeof cur.status === 'function' && cur !== window.DiggerzOnlineAdmin) return;
+      if (!cur) window.Main.diggerzService = window.DiggerzOnlineAdmin;
     } catch (e) {}
     if (++n > 240) clearInterval(t);
   }, 250);
