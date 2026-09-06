@@ -84,10 +84,10 @@ const server = http.createServer((req, res) => {
 
 const wss = new WebSocketServer({
   server,
+  // Client sends game "port" as subprotocol (e.g. "10000"); accept anything.
   handleProtocols: (protocols) => {
     const list = [...protocols];
-    if (list.length === 0) return false;
-    return list[0];
+    return list.length ? list[0] : 'diggerz';
   },
 });
 
