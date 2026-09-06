@@ -27,12 +27,9 @@ class Packet {
     this.buf = next;
   }
 
-  /** Finish writing and return a slice of written bytes. */
   toBuffer() {
     return this.buf.subarray(0, this.offset);
   }
-
-  // --- writers (match client R*) ---
 
   R0(v) {
     this.ensure(4);
@@ -58,7 +55,6 @@ class Packet {
     this.length = Math.max(this.length, this.offset);
   }
 
-  /** GUID = four int32s */
   R8(guid) {
     const g = guid || [0, 0, 0, 0];
     this.R1(g[0] | 0);
@@ -67,14 +63,12 @@ class Packet {
     this.R1(g[3] | 0);
   }
 
-  /** Length-prefixed string (client stores length+1). */
   R9(str) {
     str = String(str || '');
     this.R0(str.length + 1);
     for (let i = 0; i < str.length; i++) this.R4(str.charCodeAt(i) & 0xff);
   }
 
-  /** Float as floor + fractional*1e5 (client r8 / Q4). */
   r8(v) {
     v = Number(v) || 0;
     const whole = Math.floor(v);
@@ -86,8 +80,6 @@ class Packet {
   s0(bool) {
     this.R4(bool ? 1 : 0);
   }
-
-  // --- readers (match client Q* / r*) ---
 
   Q7() {
     if (this.offset + 4 > this.length) return 0;
@@ -155,12 +147,12 @@ function guidKey(g) {
   return (g || [0, 0, 0, 0]).join(',');
 }
 
-/** Wrap body with opcode + status header (server → client). */
 function frame(opcode, status, writeFn) {
   const p = new Packet();
   p.R2(opcode);
   p.R2(status == null ? 1 : status);
   if (writeFn) writeFn(p);
+  while (p.offset % 8 !== 0) p.R4(0);
   return p.toBuffer();
 }
 
