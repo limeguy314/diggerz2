@@ -1,32 +1,20 @@
 # diggerz2
 
-Client **build 22.11** + Node WebSocket server (flat layout).
+Client **build 22.11** + Node fight server.
 
-## Files
-- `index.html` — diggerz client (hosted mode → same host WebSocket)
-- `index.js` — HTTP static + WebSocket
-- `room.js` — multiplayer (spawn peers, movement, shared dig, weapons)
-- `packet.js` / `player.js` / `world.js` — protocol helpers
-- `package.json` / `render.yaml`
+## Server fixes
+- Fight connect: identity packet (name + **skin tone**)
+- **Offline Free Dig items/appearance** via opcode 199 (needs updated index.html inject)
+- **Mining** — 2-swing break, better tile targeting
+- Peers + shared terrain + weapons
 
-## Run locally
+## Deploy
+1. Ensure `room.js` / `player.js` / `index.js` are latest on main
+2. Upload latest **index.html** from release zip (profile inject is in the client)
+3. Render → Manual Deploy
+
+## Local
 ```bash
-npm install
-npm start
+npm install && npm start
 ```
 Open http://localhost:10000/
-
-## Render
-1. Web Service → this repo
-2. Build: `npm install` · Start: `npm start` · Health: `/health`
-3. Open https://YOUR-SERVICE.onrender.com/
-
-## Query params
-| URL | Behavior |
-|-----|----------|
-| `/` | Remote server on this host |
-| `/?local=1` | In-browser Dig+Trade only |
-| `/?server=other.host` | Force another WS host |
-
-## Multiplayer
-Join from two browsers. Type `/name YourName` in chat to set your label.
