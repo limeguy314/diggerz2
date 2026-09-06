@@ -27,13 +27,15 @@ const FORCE_HOST_INJECT = `
 (function () {
   try {
     var p = new URLSearchParams(location.search);
-    if (p.get('local') === '1') { window.__diggerzForceRemote = false; return; }
-    // Prefer full offline Dig+Trade logic (mining/inv) on this host.
-    // Remote Cr multiplayer is incomplete for dig/build; Dig+Trade works.
-    window.__diggerzForceRemote = false;
+    if (p.get('local') === '1') {
+      window.__diggerzForceRemote = false;
+      console.log('[diggerz] offline Dig+Trade only (?local=1)');
+      return;
+    }
+    window.__diggerzForceRemote = true;
     window.__diggerzRemoteHost = p.get('server') || location.hostname;
     try { localStorage.removeItem('diggerzServerUrl'); } catch (e) {}
-    console.log('[diggerz] Dig+Trade local service (full dig/inv) on', window.__diggerzRemoteHost);
+    console.log('[diggerz] FORCE ONLINE →', window.__diggerzRemoteHost);
   } catch (e) {}
 })();
 </script>
@@ -45,9 +47,58 @@ const FORCE_HOST_INJECT = `
     try { var el = document.getElementById('diggerz-pvp22'); if (el) el.style.display = 'none'; } catch (e) {}
   }
   killLobby();
-  var n = 0;
+  var n = 0, profileSent = false;
+  function loadOffline() {
+    try {
+      var raw = localStorage.getItem('diggerz.digtrade.rebuild.v3');
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (e) { return null; }
+  }
+  function u16(n) { n &= 0xffff; return [n & 255, (n >> 8) & 255]; }
+  function i32(n) { n |= 0; return [n & 255, (n >> 8) & 255, (n >> 16) & 255, (n >> 24) & 255]; }
+  function sendProfile() {
+    if (profileSent) return;
+    var offline = loadOffline();
+    if (!offline || !offline.slots) return;
+    var board = null;
+    try {
+      if (typeof q !== 'undefined' && q.GetChildByType && typeof Bd !== 'undefined')
+        board = q.GetChildByType(Bd);
+    } catch (e) {}
+    if (!board || !board.R36 || !board.R36.A11 || !board.R36.A10) return;
+    var parts = [];
+    parts.push.apply(parts, u16(199));
+    parts.push.apply(parts, i32(1));
+    parts.push.apply(parts, i32(offline.coins || 0));
+    var app = offline.appearance || [0, 247, 0, 0, 326, 0, 0, 0, 0, 0, 0];
+    parts.push.apply(parts, i32(app.length));
+    for (var i = 0; i < app.length; i++) parts.push.apply(parts, u16(app[i] || 0));
+    var slots = offline.slots || [];
+    var sn = Math.min(30, slots.length);
+    parts.push.apply(parts, i32(sn));
+    for (var j = 0; j < sn; j++) {
+      var it = slots[j] || {};
+      parts.push((it.category || 0) & 255);
+      var packed = ((it.id || 0) & 2047) | (((it.variant || 0) & 31) << 11);
+      parts.push.apply(parts, u16(packed));
+      parts.push.apply(parts, u16(it.count || 0));
+      parts.push.apply(parts, u16(it.extra || 0));
+    }
+    while (parts.length % 8) parts.push(0);
+    try {
+      board.R36.A10.sendBytes(new Uint8Array(parts));
+      profileSent = true;
+      console.log('[diggerz] offline loadout sent to online server');
+    } catch (e) {}
+  }
   var t = setInterval(function () {
     killLobby();
+    try {
+      if (window.__diggerzForceRemote && window.__diggerzRemoteHost && typeof q !== 'undefined')
+        q.SERVER_ADDRESS = window.__diggerzRemoteHost;
+    } catch (e) {}
+    try { sendProfile(); } catch (e) {}
     try {
       if (typeof l !== 'undefined') { l.a44 = true; l.a45 = true; }
       if (typeof q !== 'undefined' && q.player && typeof l !== 'undefined' && l.z39) {
@@ -55,15 +106,28 @@ const FORCE_HOST_INJECT = `
         l.z39.l9 = 0.45 + 1.1 * (q.player.l9 || 90) / 100;
       }
     } catch (e) {}
-    if (++n > 80) clearInterval(t);
+    if (++n > 120) clearInterval(t);
   }, 250);
 })();
 </script>
 `;
 
 function forceOnlineClient(html) {
-  // Full offline Dig+Trade mining/inventory/equip logic (proven working)
-  html = html.replace(/var useLocalDigTrade = [^;]+;/, 'var useLocalDigTrade = true;');
+  html = html.replace(/var useLocalDigTrade = [^;]+;/, 'var useLocalDigTrade = false; /* ONLINE only */');
+  html = html.replace(
+    /if \(\(l\.A46 \|\| l\.A45\) && !\(this\.R36 instanceof DiggerzService\)(?: && !window\.__diggerzForceRemote)?\)/g,
+    'if (false /* no offline recovery */)'
+  );
+  html = html.replace(
+    /q\.SERVER_ADDRESS\s*=\s*[^;]+;/,
+    'q.SERVER_ADDRESS = (window.__diggerzRemoteHost || location.hostname);'
+  );
+  if (html.indexOf('Wj.create("wss://" + a + ":443"') !== -1) {
+    html = html.replace(
+      'Wj.create("wss://" + a + ":443", ["" + c], null, !1);',
+      'Wj.create((location.protocol==="https:"?"wss://":"ws://")+a+(location.port?":"+location.port:""), ["" + c], null, !1);'
+    );
+  }
   html = html.replace(
     'function svc(){return window.Main&&window.Main.diggerzService?window.Main.diggerzService:null}',
     'function svc(){if(window.Main&&window.Main.diggerzService)return window.Main.diggerzService;if(window.DiggerzOnlineAdmin)return window.DiggerzOnlineAdmin;return null}'
@@ -73,8 +137,7 @@ function forceOnlineClient(html) {
 
 function injectHtml(buf, offlineAllowed) {
   let html = buf.toString('utf8');
-  // Always enable Dig+Trade local service for playable dig/build/inv
-  html = forceOnlineClient(html);
+  if (!offlineAllowed) html = forceOnlineClient(html);
   if (html.indexOf('admin-bridge.js') === -1) {
     const tag = '<script src="/admin-bridge.js"></script>';
     if (html.indexOf('<head>') !== -1) html = html.replace('<head>', '<head>' + tag, 1);
@@ -101,7 +164,9 @@ function sendFile(res, filePath, offlineAllowed) {
       return;
     }
     let body = data;
-    if (ext === '.html' && path.basename(filePath) === 'index.html') body = injectHtml(data, offlineAllowed);
+    if (ext === '.html' && path.basename(filePath) === 'index.html') {
+      body = injectHtml(data, offlineAllowed);
+    }
     res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache' });
     res.end(body);
   });
@@ -111,7 +176,9 @@ function resolveStatic(urlPath) {
   let rel = urlPath === '/' ? 'index.html' : urlPath.replace(/^\//, '');
   rel = path.normalize(rel).replace(/^(\.\.[/\\])+/, '');
   for (const fp of [path.join(PUBLIC, rel), path.join(ROOT, rel)]) {
-    if ((fp.startsWith(PUBLIC) || fp.startsWith(ROOT)) && fs.existsSync(fp) && fs.statSync(fp).isFile()) return fp;
+    if ((fp.startsWith(PUBLIC) || fp.startsWith(ROOT)) && fs.existsSync(fp) && fs.statSync(fp).isFile()) {
+      return fp;
+    }
   }
   return null;
 }
@@ -123,17 +190,29 @@ const server = http.createServer((req, res) => {
   const offlineAllowed = /(^|&)local=1(&|$)/.test(qs);
   if (url === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, service: 'diggerz-server', players: room.players.size, world: room.name }));
+    res.end(JSON.stringify({
+      ok: true,
+      service: 'diggerz-server',
+      players: room.players.size,
+      world: room.name,
+    }));
     return;
   }
   const filePath = resolveStatic(url);
-  if (!filePath) { res.writeHead(404); res.end('not found'); return; }
+  if (!filePath) {
+    res.writeHead(404);
+    res.end('not found');
+    return;
+  }
   sendFile(res, filePath, offlineAllowed);
 });
 
 const wss = new WebSocketServer({
   server,
-  handleProtocols: (protocols) => { const list = [...protocols]; return list.length ? list[0] : 'diggerz'; },
+  handleProtocols: (protocols) => {
+    const list = [...protocols];
+    return list.length ? list[0] : 'diggerz';
+  },
 });
 
 wss.on('connection', (ws) => {
@@ -141,14 +220,17 @@ wss.on('connection', (ws) => {
   room.addClient(ws);
   room.onOpen(ws);
   ws.on('message', (data) => {
-    try { room.onMessage(ws, Buffer.isBuffer(data) ? data : Buffer.from(data)); }
-    catch (e) { console.error('packet error', e); }
+    try {
+      room.onMessage(ws, Buffer.isBuffer(data) ? data : Buffer.from(data));
+    } catch (e) {
+      console.error('packet error', e);
+    }
   });
-  ws.on('close', () => { room.removeClient(ws); });
+  ws.on('close', () => room.removeClient(ws));
   ws.on('error', (err) => console.error('ws error', err.message));
 });
 
 server.listen(PORT, () => {
   console.log('diggerz-server on :' + PORT);
-  console.log('Dig+Trade local logic enabled for dig/inv');
+  console.log('ONLINE forced (use ?local=1 for offline Dig+Trade)');
 });
