@@ -121,9 +121,19 @@ class Room {
     this.sendAccess(ws);
     this.sendCoins(ws, player);
     setTimeout(() => {
-      if (player.ws) { this.sendInventory(player.ws, player); this.sendPlayer(player.ws, player); }
+      if (player.ws) {
+        this.sendAccess(player.ws);
+        this.sendInventory(player.ws, player);
+        this.sendPlayer(player.ws, player);
+      }
     }, 400);
-    this.message(ws, '^2Online. ^7Dig dirt, place blocks, equip tools from hotbar.');
+    setTimeout(() => {
+      if (player.ws) {
+        this.sendAccess(player.ws);
+        this.sendInventory(player.ws, player);
+      }
+    }, 1200);
+    this.message(ws, '^2Online unlocked. ^7Dig, place, equip tools. Type /name YourName');
     player.ready = true;
     this.syncPeers(ws, player);
   }
@@ -196,7 +206,10 @@ class Room {
       p.R2(0);
     });
   }
-  sendAccess(ws) { this.send(ws, 8, 1, (p) => { p.R2(1); p.R2(1); }); }
+  sendAccess(ws) {
+    // Opcode 143 -> X31 sets l.a44 / l.a45 (dig + build). Opcode 8 is NOT access.
+    this.send(ws, 143, 1, (p) => { p.s0(true); p.s0(true); });
+  }
   sendCoins(ws, player) { this.send(ws, 17, 1, (p) => p.R0(player.coins | 0)); }
   sendTile(x, y, id, variant = 0) {
     this.broadcast(11, 1, (p) => {
