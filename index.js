@@ -47,6 +47,72 @@ const FORCE_HOST_INJECT = `
     try { var el = document.getElementById('diggerz-pvp22'); if (el) el.style.display = 'none'; } catch (e) {}
   }
   killLobby();
+
+  var ATTACK = { 240: 25, 326: 20, 248: 20, 79: 22, 93: 22, 328: 20 };
+
+  function selectedItem() {
+    try {
+      if (!l || !l.z39 || !l.z39.n38 || !l.z39.n38.B30) return null;
+      var idx = l.z39.n38.q43 | 0;
+      return l.z39.n38.B30[idx] || null;
+    } catch (e) { return null; }
+  }
+
+  function forceEquipSlot(idx) {
+    try {
+      if (!l || !l.z39 || !l.z39.n38) return;
+      l.z39.n38.q43 = idx;
+      try { if (typeof K !== 'undefined' && K.a15) K.a15(idx); } catch (e) {}
+      var it = l.z39.n38.B30 && l.z39.n38.B30[idx];
+      if (it && it.a4 === 2) {
+        var atk = ATTACK[it.h44] || it.u41 || 25;
+        l.z39.j35 = l.z39.j35 || { u41: atk };
+        l.z39.j35.u41 = atk;
+        if (it.h44 === 240) l.z39.j36 = l.z39.j35;
+        else l.z39.j36 = null;
+      }
+    } catch (e) {}
+  }
+
+  function autoSelectTool() {
+    try {
+      if (!l || !l.z39 || !l.z39.n38 || !l.z39.n38.B30) return;
+      var slots = l.z39.n38.B30;
+      var pick = -1, anyTool = -1;
+      for (var i = 0; i < slots.length; i++) {
+        var it = slots[i];
+        if (!it || it.a4 !== 2) continue;
+        if (it.h44 === 240) pick = i;
+        if (anyTool < 0) anyTool = i;
+      }
+      var want = pick >= 0 ? pick : anyTool;
+      if (want >= 0) forceEquipSlot(want);
+    } catch (e) {}
+  }
+
+  window.addEventListener('keydown', function (ev) {
+    var k = ev.keyCode || ev.which;
+    if (k >= 49 && k <= 57) forceEquipSlot(k - 49);
+  }, true);
+
+  var lastAtk = 0;
+  window.addEventListener('mousedown', function (ev) {
+    if (ev.button !== 0) return;
+    try {
+      var it = selectedItem();
+      if (!it || it.a4 !== 2) return;
+      var now = Date.now();
+      if (now - lastAtk < 100) return;
+      lastAtk = now;
+      forceEquipSlot(l.z39.n38.q43 | 0);
+      if (typeof K === 'undefined' || !K._16 || !l || !l.z39) return;
+      var mx = (typeof q !== 'undefined' && q.mX != null) ? q.mX : l.z39.b6;
+      var my = (typeof q !== 'undefined' && q.mY != null) ? q.mY : l.z39.b7;
+      var atk = ATTACK[it.h44] || it.u41 || 25;
+      K._16(l.z39.b6, l.z39.b7, mx, my, atk);
+    } catch (e) {}
+  }, true);
+
   var n = 0, profileSent = false;
   function loadOffline() {
     try {
@@ -89,9 +155,9 @@ const FORCE_HOST_INJECT = `
     try {
       board.R36.A10.sendBytes(new Uint8Array(parts));
       profileSent = true;
-      console.log('[diggerz] offline loadout sent to online server');
     } catch (e) {}
   }
+
   var t = setInterval(function () {
     killLobby();
     try {
@@ -105,24 +171,9 @@ const FORCE_HOST_INJECT = `
         if (!q.player.l9) q.player.l9 = 90;
         l.z39.l9 = 0.45 + 1.1 * (q.player.l9 || 90) / 100;
       }
-      // Auto-select pickaxe/tool so dig works
-      if (typeof l !== 'undefined' && l.z39 && l.z39.n38 && l.z39.n38.B30) {
-        var slots = l.z39.n38.B30;
-        var pick = -1, anyTool = -1;
-        for (var i = 0; i < slots.length; i++) {
-          var it = slots[i];
-          if (!it || !it.a4) continue;
-          if (it.a4 === 2 && it.h44 === 240) pick = i;
-          if (it.a4 === 2 && anyTool < 0) anyTool = i;
-        }
-        var want = pick >= 0 ? pick : anyTool;
-        if (want >= 0) {
-          l.z39.n38.q43 = want;
-          try { if (typeof K !== 'undefined' && K.a15) K.a15(want); } catch (e2) {}
-        }
-      }
+      autoSelectTool();
     } catch (e) {}
-    if (++n > 120) clearInterval(t);
+    if (++n > 160) clearInterval(t);
   }, 250);
 })();
 </script>
@@ -248,5 +299,5 @@ wss.on('connection', (ws) => {
 
 server.listen(PORT, () => {
   console.log('diggerz-server on :' + PORT);
-  console.log('ONLINE forced (use ?local=1 for offline Dig+Trade)');
+  console.log('ONLINE + tool equip inject + chat bubbles');
 });
