@@ -96,23 +96,36 @@ class Room {
         const extra = packet.Q9();
         slots[i] = item(category, packed & 2047, (packed >> 11) & 31, count, extra, '');
       }
-      if (!slots.some((s) => s.category === 2 && s.count > 0)) {
-        slots[0] = item(2, 326, 1, 1, 0, '');
-        slots[1] = item(2, 240, 0, 1, 0, '');
-      }
-      const pick = slots.findIndex((s) => s.category === 2 && s.id === 240 && s.count > 0);
-      player.selectedSlot = pick >= 0 ? pick : 0;
       player.slots = slots;
       player.profileReceived = true;
+      this.ensureStarterKit(player);
     } catch (e) { console.error('profile', e.message); }
   }
+  ensureStarterKit(player) {
+    if (!player.slots) player.slots = [];
+    while (player.slots.length < 30) player.slots.push(emptyItem());
+    const hasTool = player.slots.some((s) => s && s.category === 2 && s.count > 0);
+    const hasBlock = player.slots.some((s) => s && s.category === 1 && s.count > 0);
+    if (!hasTool) {
+      player.slots[0] = item(2, 326, 1, 1, 0, '');
+      player.slots[1] = item(2, 240, 0, 1, 0, '');
+    }
+    if (!hasBlock) {
+      player.slots[2] = item(1, 100, 0, 64, 0, '');
+      player.slots[3] = item(1, 108, 0, 64, 0, '');
+    }
+    const pick = player.slots.findIndex((s) => s.category === 2 && s.id === 240 && s.count > 0);
+    if (pick >= 0) player.selectedSlot = pick;
+  }
   pushLoadout(ws, player) {
+    this.ensureStarterKit(player);
     this.sendPlayer(ws, player);
     this.sendInventory(ws, player);
     this.sendCoins(ws, player);
     this.broadcast(5, 1, (p) => this.writePlayerBody(p, player), ws);
   }
   finishJoin(ws, player) {
+    this.ensureStarterKit(player);
     player.x = 12;
     player.y = this.world.surface - 2;
     this.sendPlayer(ws, player);
@@ -121,6 +134,7 @@ class Room {
     this.sendCoins(ws, player);
     setTimeout(() => {
       if (player.ws) {
+        this.ensureStarterKit(player);
         this.sendAccess(player.ws);
         this.sendInventory(player.ws, player);
         this.sendPlayer(player.ws, player);
@@ -132,7 +146,7 @@ class Room {
         this.sendInventory(player.ws, player);
       }
     }, 1200);
-    this.message(ws, '^2Online unlocked. ^7Dig, place, equip tools. Type /name YourName');
+    this.message(ws, '^2Online unlocked. ^7Select pickaxe to dig, blocks to place. /name YourName');
     player.ready = true;
     this.syncPeers(ws, player);
   }
@@ -241,10 +255,12 @@ class Room {
     }, exceptWs);
   }
   equip(ws, player, packet) {
-    const slot = packet.Q7();
-    if (slot < 0 || slot >= (player.slots || []).length) { this.sendInventory(ws, player); return; }
+    let slot = 0;
+    try { slot = packet.Q7() | 0; } catch (e) { this.sendInventory(ws, player); return; }
+    this.ensureStarterKit(player);
+    if (slot < 0 || slot >= player.slots.length) { this.sendInventory(ws, player); return; }
     const it = player.slots[slot];
-    if (!it || it.count <= 0) { this.sendInventory(ws, player); return; }
+    if (!it || !it.count) { this.sendInventory(ws, player); return; }
     player.selectedSlot = slot;
     if (it.category === 2) {
       const appSlot = APPEARANCE_FOR[it.id];
@@ -253,9 +269,10 @@ class Room {
         player.appearance[appSlot] = it.id;
       }
     }
-    this.sendPlayer(ws, player);
     this.sendInventory(ws, player);
+    this.sendPlayer(ws, player);
     this.broadcast(5, 1, (p) => this.writePlayerBody(p, player), ws);
+    setTimeout(() => { if (player.ws) this.sendInventory(player.ws, player); }, 100);
   }
   swap(ws, player, packet) {
     try {
@@ -351,9 +368,30 @@ class Room {
       return;
     }
     if (!hasTile) return;
+    const minedId = tileAt(this.world, tx, ty);
     setTile(this.world, tx, ty, 0);
     this.sendHit(tx, ty, 5);
     this.sendTile(tx, ty, 0);
+    if (minedId) {
+      let stacked = false;
+      for (let i = 0; i < player.slots.length; i++) {
+        const s = player.slots[i];
+        if (s.category === 1 && s.id === minedId && s.count > 0) {
+          s.count = Math.min(999, s.count + 1);
+          stacked = true;
+          break;
+        }
+      }
+      if (!stacked) {
+        for (let i = 0; i < player.slots.length; i++) {
+          if (!player.slots[i].count) {
+            player.slots[i] = item(1, minedId, 0, 1, 0, '');
+            break;
+          }
+        }
+      }
+      this.sendInventory(ws, player);
+    }
   }
   weaponTerrain(player, fromX, fromY, toX, toY, attackType) {
     const px = player.x, py = player.y;
