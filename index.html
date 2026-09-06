@@ -1,24 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<script>
-/* Hosted mode: use this machine as the game server unless ?local=1 */
-(function () {
-  try {
-    var p = new URLSearchParams(location.search);
-    if (p.get('local') === '1') {
-      window.__diggerzForceRemote = false;
-      return;
-    }
-    if (location.protocol === 'http:' || location.protocol === 'https:') {
-      window.__diggerzForceRemote = true;
-      window.__diggerzRemoteHost = p.get('server') || location.hostname;
-      console.log('[diggerz] remote server host =', window.__diggerzRemoteHost);
-    }
-  } catch (e) {}
-})();
-</script>
-
 <meta charset="utf-8">
 <!-- Original game client supplied by the user; image sheets recovered from
 https://github.com/Benusz/diggerz. Original content retains its original ownership.
@@ -18299,7 +18281,7 @@ $jscomp.polyfill("Array.prototype.find", function(ca) {
         q.children.push(a);
         0 == l.a48 && (0 <= q.SERVER_ADDRESS.indexOf("server") ? (l.a48 = 80,
         l.a49 = V.B10(1E4, 10015)) : l.a48 = l.a49 = 1E4);
-        var useLocalDigTrade = (l.A46 || q.diggerzDigTradeRequested === !0 || q.diggerzPvpRequested === !0) && !window.__diggerzForceRemote;
+        var useLocalDigTrade = l.A46 || q.diggerzDigTradeRequested === !0 || q.diggerzPvpRequested === !0;
         useLocalDigTrade && (l.A46 = !0);
         var usePvpTest = q.diggerzPvpRequested === !0;
         q.diggerzDigTradeRequested = !1;
@@ -22063,14 +22045,7 @@ $jscomp.polyfill("Array.prototype.find", function(ca) {
             this.a19 = []
         },
         m6: function(a, b, c) {
-            this.A10 = Wj.create((function(h) {
-                var isLocal = /^(localhost|127\.0\.0\.1|0\.0\.0\.0)$/i.test(h);
-                if (isLocal || (typeof location !== "undefined" && location.protocol === "http:")) {
-                    var port = (typeof location !== "undefined" && location.port) ? location.port : "10000";
-                    return "ws://" + h + ":" + port;
-                }
-                return "wss://" + h + ":443";
-            })(a), ["" + c], null, !1);
+            this.A10 = Wj.create("wss://" + a + ":443", ["" + c], null, !1);
             null != this.A10 && (this.A10.onmessageBytes = A(this, this.A15),
             this.A10.onclose = A(this, this.A14),
             this.A10.onopen = A(this, this.A13))
@@ -113655,7 +113630,7 @@ $jscomp.polyfill("Array.prototype.find", function(ca) {
         a.set_length(0)
     }
     );
-    q.SERVER_ADDRESS = (typeof window !== "undefined" && window.__diggerzRemoteHost) ? window.__diggerzRemoteHost : "game.diggerz.io";
+    q.SERVER_ADDRESS = "game.diggerz.io";
     q.WEB_ROOT = "diggerz.io";
     q.cheats = !1;
     q.domainLock = !1;
@@ -115543,7 +115518,7 @@ $jscomp.polyfill("Array.prototype.find", function(ca) {
 	</div>
 
 <details id="diggerz-diagnostics" style="position:fixed;bottom:8px;left:8px;z-index:2147483646;max-width:calc(100vw - 32px);max-height:45vh;overflow:auto;background:#182331;color:white;border:1px solid #9baabe;border-radius:6px;padding:8px;font:12px/1.4 monospace;user-select:text;">
-<summary style="cursor:pointer;font-family:sans-serif">Troubleshooting · build 22.11 + remote</summary>
+<summary style="cursor:pointer;font-family:sans-serif">Troubleshooting · build 21.7 + weapons</summary>
 <pre id="diggerz-diagnostics-text" style="white-space:pre-wrap;margin:8px 0 0">Waiting for the game…</pre>
 </details>
 <script>
@@ -115559,7 +115534,7 @@ $jscomp.polyfill("Array.prototype.find", function(ca) {
     });
     setInterval(function () {
         var main = window.Main, now = performance.now();
-        var lines = ['Diggerz original client · build 22.11 + remote'];
+        var lines = ['Diggerz original client · build 21.7 + weapons'];
         if (!main || !main.thisMain) {
             lines.push('Runtime: waiting for assets/startup');
         } else {
