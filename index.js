@@ -95,6 +95,26 @@ const FORCE_HOST_INJECT = `
         q.SERVER_ADDRESS = window.__diggerzRemoteHost;
     } catch (e) {}
     try { sendProfile(); } catch (e) {}
+    try {
+      if (typeof q !== 'undefined' && q.player && typeof l !== 'undefined' && l.z39) {
+        if (!q.player.l9) q.player.l9 = 90;
+        l.z39.l9 = 0.45 + 1.1 * (q.player.l9 || 90) / 100;
+      }
+      if (typeof l !== 'undefined') {
+        l.a44 = true;
+        l.a45 = true;
+      }
+      if (typeof K !== 'undefined' && K.a15 && typeof l !== 'undefined' && l.z39 && l.z39.n38 && l.z39.n38.B30) {
+        var slots = l.z39.n38.B30;
+        for (var i = 0; i < slots.length; i++) {
+          if (slots[i] && slots[i].a4 === 2) {
+            l.z39.n38.q43 = i;
+            try { K.a15(i); } catch (e2) {}
+            break;
+          }
+        }
+      }
+    } catch (e) {}
     if (++n > 120) clearInterval(t);
   }, 250);
 })();
