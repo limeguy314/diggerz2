@@ -2,8 +2,8 @@
 
 /**
  * diggerz-server — flat layout.
- * Serves index.html with a small inject so the client ALWAYS uses this host
- * (Render) and never opens the Build 22.11 JSON matchmaking lobby / offline room.
+ * When serving index.html, rewrites the client so FIGHT always uses this host
+ * (binary Cr socket → single shared Room). Offline only with ?local=1.
  */
 
 const http = require('http');
@@ -28,7 +28,6 @@ const MIME = {
   '.ico': 'image/x-icon',
 };
 
-/** Injected into every index.html response — forces single shared Render room. */
 const FORCE_HOST_INJECT = `
 <script id="diggerz-force-host">
 (function () {
@@ -38,19 +37,18 @@ const FORCE_HOST_INJECT = `
       window.__diggerzForceRemote = false;
       return;
     }
-    if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
     window.__diggerzForceRemote = true;
     window.__diggerzRemoteHost = p.get('server') || location.hostname;
     try { localStorage.removeItem('diggerzServerUrl'); } catch (e) {}
-    console.log('[diggerz] force single server =', window.__diggerzRemoteHost);
+    console.log('[diggerz] FORCE online →', window.__diggerzRemoteHost);
   } catch (e) {}
 })();
 </script>
 <script>
 (function () {
-  function killMatchmaking() {
+  function killLobby() {
     window.DiggerzBeginBackgroundMatchmaking = function () {
-      console.log('[diggerz] matchmaking disabled — using this host only');
+      console.log('[diggerz] lobby disabled');
     };
     window.DiggerzOpenPvp22 = function () {};
     try {
@@ -58,10 +56,10 @@ const FORCE_HOST_INJECT = `
       if (el) el.style.display = 'none';
     } catch (e) {}
   }
-  killMatchmaking();
+  killLobby();
   var n = 0;
   var t = setInterval(function () {
-    killMatchmaking();
+    killLobby();
     try {
       if (window.__diggerzForceRemote && window.__diggerzRemoteHost && typeof q !== 'undefined') {
         q.SERVER_ADDRESS = window.__diggerzRemoteHost;
@@ -73,18 +71,49 @@ const FORCE_HOST_INJECT = `
 </script>
 `;
 
-function injectHtml(buf) {
+/** Rewrite minified client so it cannot choose offline Dig+Trade / recovery room. */
+function forceOnlineClient(html) {
+  html = html.replace(
+    /var useLocalDigTrade = [^;]+;/,
+    'var useLocalDigTrade = false; /* server inject: online only */'
+  );
+  html = html.replace(
+    /if \(\(l\.A46 \|\| l\.A45\) && !\(this\.R36 instanceof DiggerzService\)(?: && !window\.__diggerzForceRemote)?\)/g,
+    'if (false /* server inject: no offline recovery */)'
+  );
+  html = html.replace(
+    /q\.SERVER_ADDRESS\s*=\s*[^;]+;/,
+    'q.SERVER_ADDRESS = (window.__diggerzRemoteHost || location.hostname);'
+  );
+  if (html.indexOf('Wj.create("wss://" + a + ":443"') !== -1) {
+    html = html.replace(
+      'Wj.create("wss://" + a + ":443", ["" + c], null, !1);',
+      'Wj.create((location.protocol==="https:"?"wss://":"ws://")+a+(location.port?":"+location.port:""), ["" + c], null, !1);'
+    );
+  }
+  html = html.replace(
+    /window\.DiggerzBeginBackgroundMatchmaking\s*=\s*function\s*\([^)]*\)\s*\{[^}]*\}/,
+    'window.DiggerzBeginBackgroundMatchmaking=function(){console.log("[diggerz] lobby off")}'
+  );
+  return html;
+}
+
+function injectHtml(buf, offlineAllowed) {
   let html = buf.toString('utf8');
-  if (html.indexOf('id="diggerz-force-host"') !== -1) return Buffer.from(html, 'utf8');
-  if (html.indexOf('<head>') !== -1) {
-    html = html.replace('<head>', '<head>' + FORCE_HOST_INJECT, 1);
-  } else {
-    html = FORCE_HOST_INJECT + html;
+  if (!offlineAllowed) {
+    html = forceOnlineClient(html);
+  }
+  if (html.indexOf('id="diggerz-force-host"') === -1) {
+    if (html.indexOf('<head>') !== -1) {
+      html = html.replace('<head>', '<head>' + FORCE_HOST_INJECT, 1);
+    } else {
+      html = FORCE_HOST_INJECT + html;
+    }
   }
   return Buffer.from(html, 'utf8');
 }
 
-function sendFile(res, filePath) {
+function sendFile(res, filePath, offlineAllowed) {
   const ext = path.extname(filePath).toLowerCase();
   const type = MIME[ext] || 'application/octet-stream';
   fs.readFile(filePath, (err, data) => {
@@ -95,11 +124,11 @@ function sendFile(res, filePath) {
     }
     let body = data;
     if (ext === '.html' && path.basename(filePath) === 'index.html') {
-      body = injectHtml(data);
+      body = injectHtml(data, offlineAllowed);
     }
     res.writeHead(200, {
       'Content-Type': type,
-      'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=3600',
+      'Cache-Control': 'no-cache',
     });
     res.end(body);
   });
@@ -118,7 +147,10 @@ function resolveStatic(urlPath) {
 }
 
 const server = http.createServer((req, res) => {
-  const url = (req.url || '/').split('?')[0];
+  const rawUrl = req.url || '/';
+  const url = rawUrl.split('?')[0];
+  const qs = rawUrl.includes('?') ? rawUrl.slice(rawUrl.indexOf('?') + 1) : '';
+  const offlineAllowed = /(^|&)local=1(&|$)/.test(qs);
 
   if (url === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -137,7 +169,7 @@ const server = http.createServer((req, res) => {
     res.end('not found');
     return;
   }
-  sendFile(res, filePath);
+  sendFile(res, filePath, offlineAllowed);
 });
 
 const wss = new WebSocketServer({
@@ -172,7 +204,7 @@ wss.on('connection', (ws, req) => {
 
 server.listen(PORT, () => {
   console.log('diggerz-server on :' + PORT);
-  console.log('single shared room — all clients join the same world');
+  console.log('online-only inject active (use ?local=1 for offline Dig+Trade)');
   console.log('game:   http://localhost:' + PORT + '/');
   console.log('health: http://localhost:' + PORT + '/health');
 });
