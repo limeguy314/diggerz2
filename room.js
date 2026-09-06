@@ -5,15 +5,14 @@ const { createWorld, tileAt, setTile } = require('./world');
 const { createPlayer } = require('./player');
 
 /**
- * One multiplayer room. Implements the subset of the recovered Dig+Trade
- * protocol needed for connect → spawn → move → dig → build → weapons → chat.
+ * Multiplayer room: spawn other players, sync movement, shared mining.
  */
 class Room {
   constructor(name = 'Free Dig') {
     this.name = name;
     this.world = createWorld(128, 80);
-    this.players = new Map(); // guidKey -> player
-    this.damage = new Map(); // "x:y" -> hits
+    this.players = new Map();
+    this.damage = new Map();
   }
 
   addClient(ws) {
@@ -29,8 +28,8 @@ class Room {
     const player = ws._player;
     if (!player) return;
     this.players.delete(guidKey(player.id));
+    this.broadcastPlayerDespawn(player);
     player.ws = null;
-    // TODO: broadcast leave if you add multi-player visibility packets
   }
 
   send(ws, opcode, status, writeFn) {
@@ -48,18 +47,20 @@ class Room {
     }
   }
 
-  /** Client → server packet. */
+  onOpen(ws) {
+    const player = ws._player;
+    if (!player) return;
+    this.sendLogin(ws, player);
+  }
+
   onMessage(ws, buffer) {
     const packet = Packet.from(buffer);
     const opcode = packet.Q9();
-    // Client A17 may send body only (opcode + payload) without status, or with.
-    // Local service A17 writes opcode then body. Cr pads to 8. Read carefully.
     const player = ws._player;
     if (!player) return;
 
     switch (opcode) {
       case 2:
-        // Client requests login after socket open (some builds).
         this.sendLogin(ws, player);
         break;
       case 4:
@@ -67,7 +68,9 @@ class Room {
         this.sendWorld(ws);
         break;
       case 6:
-        this.readMovement(player, packet);
+      case 8:
+        this.readMovement(player, packet, opcode);
+        this.broadcastMovement(player, ws);
         break;
       case 11:
         this.build(ws, player, packet);
@@ -79,36 +82,41 @@ class Room {
         this.sendInventory(ws, player);
         break;
       case 16:
-        // pickup — ignore body for now
         break;
       case 18:
-        // Full spawn request after world
         this.sendPlayer(ws, player);
         this.sendInventory(ws, player);
         this.sendAccess(ws);
         this.sendCoins(ws, player);
-        this.message(ws, '^2Server ready. ^7WASD move; pickaxe digs; guns fire (opcode 287 echo).');
+        this.message(ws, '^2Server ready. ^7Other players should appear nearby.');
         player.ready = true;
+        this.syncPeers(ws, player);
         break;
       case 28:
       case 33:
       case 52:
       case 281:
-        // equip / swap / drop / variant — acknowledge inventory
         this.sendInventory(ws, player);
         break;
       case 287:
         this.digOrAttack(ws, player, packet);
         break;
-      case 288:
-        break;
       default:
-        // Unknown — ignore
         break;
     }
   }
 
-  // --- outbound helpers (mirror DiggerzService) ---
+  syncPeers(ws, joiner) {
+    for (const other of this.players.values()) {
+      if (!other.ready || other === joiner) continue;
+      this.sendPlayerTo(ws, other);
+      if (other.ws) this.sendPlayerTo(other.ws, joiner);
+    }
+  }
+
+  broadcastPlayerDespawn(player) {
+    this.broadcast(5, 1, (p) => this.writePlayerBody(p, player, { hidden: true }));
+  }
 
   sendLogin(ws, player) {
     this.send(ws, 2, 1, (p) => {
@@ -159,31 +167,38 @@ class Room {
     });
   }
 
+  writePlayerBody(p, player, opts = {}) {
+    const hidden = !!opts.hidden;
+    p.R8(player.id);
+    p.R9(player.name);
+    p.r8(player.x);
+    p.r8(0);
+    p.r8(player.y);
+    p.r8(0);
+    p.R2(player.appearance.length);
+    for (let i = 0; i < player.appearance.length; i++) p.R2(player.appearance[i] || 0);
+    p.R9(player.appearanceText || '');
+    p.R2(0);
+    p.R4(0);
+    p.R2(0);
+    p.s0(false);
+    p.R2(1);
+    p.R0(0);
+    p.s0(false);
+    p.R0(0);
+    p.R2(0);
+    p.R8(zeroGuid());
+    p.R4(0);
+    p.r8(1.44);
+    p.r8(hidden ? 0 : 1);
+  }
+
   sendPlayer(ws, player) {
-    this.send(ws, 5, 1, (p) => {
-      p.R8(player.id);
-      p.R9(player.name);
-      p.r8(player.x);
-      p.r8(0);
-      p.r8(player.y);
-      p.r8(0);
-      p.R2(player.appearance.length);
-      for (let i = 0; i < player.appearance.length; i++) p.R2(player.appearance[i] || 0);
-      p.R9(player.appearanceText || '');
-      p.R2(0);
-      p.R4(0);
-      p.R2(0);
-      p.s0(false);
-      p.R2(1);
-      p.R0(0);
-      p.s0(false);
-      p.R0(0);
-      p.R2(0);
-      p.R8(zeroGuid());
-      p.R4(0);
-      p.r8(1.44);
-      p.r8(1);
-    });
+    this.send(ws, 5, 1, (p) => this.writePlayerBody(p, player));
+  }
+
+  sendPlayerTo(ws, player) {
+    this.send(ws, 5, 1, (p) => this.writePlayerBody(p, player));
   }
 
   sendInventory(ws, player) {
@@ -246,26 +261,72 @@ class Room {
     });
   }
 
-  readMovement(player, packet) {
-    // Client movement packets vary; try to read two floats if present.
-    if (packet.remaining() >= 16) {
-      const x = packet.Q4();
-      const y = packet.Q4();
-      if (isFinite(x) && isFinite(y)) {
-        player.x = x;
-        player.y = y;
+  readMovement(player, packet, opcode) {
+    try {
+      if (opcode === 8) {
+        packet.r6();
+        const x = packet.Q4();
+        packet.Q4();
+        const y = packet.Q4();
+        if (isFinite(x) && isFinite(y)) {
+          player.x = x;
+          player.y = y;
+        }
+        return;
       }
-    }
+      if (packet.remaining() >= 16) {
+        const x = packet.Q4();
+        const y = packet.Q4();
+        if (isFinite(x) && isFinite(y)) {
+          player.x = x;
+          player.y = y;
+        }
+      }
+    } catch (e) {}
   }
 
-  build(ws, player, packet) {
-    // Simplified: ignore full layout, no-op safe
+  broadcastMovement(player, exceptWs) {
+    this.broadcast(
+      6,
+      1,
+      (p) => {
+        p.R8(player.id);
+        p.r8(player.x);
+        p.r8(player.y);
+        p.r8(0);
+        p.r8(0);
+        p.r8(0);
+        p.r8(0);
+        p.R2(0);
+        p.R4(0);
+        p.R4(0);
+        p.R2(0);
+        p.R2(0);
+      },
+      exceptWs
+    );
   }
+
+  build(ws, player, packet) {}
 
   chat(ws, player, packet) {
-    const text = packet.r5 ? packet.r5() : '';
-    // Some clients send string differently — try remaining as best-effort
-    this.message(ws, '^7[Server] ' + (text || 'ok'));
+    let text = '';
+    try {
+      text = packet.r5();
+    } catch (e) {}
+    const m = /^\/name\s+(.+)/i.exec(text || '');
+    if (m) {
+      player.name = String(m[1]).slice(0, 24);
+      this.message(ws, '^2Name set to ' + player.name);
+      this.broadcast(5, 1, (p) => this.writePlayerBody(p, player), null);
+      return;
+    }
+    if (text) {
+      const line = '^7' + player.name + ': ' + text.slice(0, 120);
+      for (const p of this.players.values()) {
+        if (p.ws) this.message(p.ws, line);
+      }
+    }
   }
 
   digOrAttack(ws, player, packet) {
@@ -274,7 +335,6 @@ class Room {
     const toX = packet.Q4();
     const toY = packet.Q4();
     const attackType = packet.r1();
-    // optional slot / guid may follow
 
     const isMining =
       attackType === 25 ||
@@ -283,34 +343,20 @@ class Room {
       attackType === 40;
 
     if (!isMining) {
-      // Echo projectile so client y32 spawns gun/mortar visuals
-      this.send(ws, 287, 1, (p) => {
+      const writeShot = (p) => {
         p.r8(attackX);
         p.r8(attackY);
         p.r8(toX);
         p.r8(toY);
         p.R0(attackType | 0);
         p.R8(player.id);
-      });
-      // Broadcast to others so they see the shot
-      this.broadcast(
-        287,
-        1,
-        (p) => {
-          p.r8(attackX);
-          p.r8(attackY);
-          p.r8(toX);
-          p.r8(toY);
-          p.R0(attackType | 0);
-          p.R8(player.id);
-        },
-        ws
-      );
+      };
+      this.send(ws, 287, 1, writeShot);
+      this.broadcast(287, 1, writeShot, ws);
       this.weaponTerrain(player, attackX, attackY, toX, toY, attackType);
       return;
     }
 
-    // Mining
     let tx = Math.round(attackX);
     let ty = Math.round(attackY);
     const id = tileAt(this.world, tx, ty);
@@ -350,16 +396,6 @@ class Room {
         if (broken >= 3) break;
       }
     }
-  }
-
-  /**
-   * After TCP/WS connect the original client expects a login response (opcode 2)
-   * before continuing. Push login immediately on open.
-   */
-  onOpen(ws) {
-    const player = ws._player;
-    if (!player) return;
-    this.sendLogin(ws, player);
   }
 }
 
