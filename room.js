@@ -146,7 +146,7 @@ class Room {
         this.sendInventory(player.ws, player);
       }
     }, 1200);
-    this.message(ws, '^2Online unlocked. ^7Select pickaxe to dig, blocks to place. /name YourName');
+    this.message(ws, '^2Online unlocked. ^7Keys 1-9 equip. Click to dig/shoot. /name YourName');
     player.ready = true;
     this.syncPeers(ws, player);
   }
@@ -323,9 +323,15 @@ class Room {
       this.pushLoadout(ws, player);
       return;
     }
-    if (text) {
-      const line = '^7' + player.name + ': ' + text.slice(0, 120);
-      for (const p of this.players.values()) if (p.ws) this.message(p.ws, line);
+    if (!text) return;
+    text = String(text).slice(0, 120);
+    // Opcode 12 → client v39 → chat bubble above head
+    for (const p of this.players.values()) {
+      if (!p.ws) continue;
+      this.send(p.ws, 12, 1, (pkt) => {
+        pkt.R8(player.id);
+        pkt.R9(text);
+      });
     }
   }
   digOrAttack(ws, player, packet) {
