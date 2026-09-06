@@ -49,35 +49,34 @@ const FORCE_HOST_INJECT = `
   killLobby();
 
   var ATTACK = { 240: 25, 326: 20, 248: 20, 79: 22, 93: 22, 328: 20 };
+  var equippedOnce = false;
+  var lastAtk = 0;
 
   function selectedItem() {
     try {
-      if (!l || !l.z39 || !l.z39.n38 || !l.z39.n38.B30) return null;
+      if (typeof l === 'undefined' || !l.z39 || !l.z39.n38 || !l.z39.n38.B30) return null;
       var idx = l.z39.n38.q43 | 0;
+      if (idx < 0 || idx >= l.z39.n38.B30.length) return null;
       return l.z39.n38.B30[idx] || null;
     } catch (e) { return null; }
   }
 
   function forceEquipSlot(idx) {
     try {
-      if (!l || !l.z39 || !l.z39.n38) return;
+      if (typeof l === 'undefined' || !l.z39 || !l.z39.n38 || !l.z39.n38.B30) return;
+      if (idx < 0 || idx >= l.z39.n38.B30.length) return;
+      if (!l.z39.n38.B30[idx]) return;
       l.z39.n38.q43 = idx;
       try { if (typeof K !== 'undefined' && K.a15) K.a15(idx); } catch (e) {}
-      var it = l.z39.n38.B30 && l.z39.n38.B30[idx];
-      if (it && it.a4 === 2) {
-        var atk = ATTACK[it.h44] || it.u41 || 25;
-        l.z39.j35 = l.z39.j35 || { u41: atk };
-        l.z39.j35.u41 = atk;
-        if (it.h44 === 240) l.z39.j36 = l.z39.j35;
-        else l.z39.j36 = null;
-      }
     } catch (e) {}
   }
 
-  function autoSelectTool() {
+  function autoSelectToolOnce() {
+    if (equippedOnce) return;
     try {
-      if (!l || !l.z39 || !l.z39.n38 || !l.z39.n38.B30) return;
+      if (typeof l === 'undefined' || !l.z39 || !l.z39.n38 || !l.z39.n38.B30) return;
       var slots = l.z39.n38.B30;
+      if (!slots.length) return;
       var pick = -1, anyTool = -1;
       for (var i = 0; i < slots.length; i++) {
         var it = slots[i];
@@ -86,31 +85,39 @@ const FORCE_HOST_INJECT = `
         if (anyTool < 0) anyTool = i;
       }
       var want = pick >= 0 ? pick : anyTool;
-      if (want >= 0) forceEquipSlot(want);
+      if (want >= 0) {
+        forceEquipSlot(want);
+        equippedOnce = true;
+      }
     } catch (e) {}
   }
 
   window.addEventListener('keydown', function (ev) {
-    var k = ev.keyCode || ev.which;
-    if (k >= 49 && k <= 57) forceEquipSlot(k - 49);
+    try {
+      var k = ev.keyCode || ev.which;
+      if (k >= 49 && k <= 57) forceEquipSlot(k - 49);
+    } catch (e) {}
   }, true);
 
-  var lastAtk = 0;
   window.addEventListener('mousedown', function (ev) {
     if (ev.button !== 0) return;
     try {
+      if (typeof l === 'undefined' || !l.z39 || typeof K === 'undefined' || !K._16) return;
+      if (typeof l._44 !== 'number' || !l._44) return;
       var it = selectedItem();
       if (!it || it.a4 !== 2) return;
       var now = Date.now();
-      if (now - lastAtk < 100) return;
+      if (now - lastAtk < 150) return;
       lastAtk = now;
-      forceEquipSlot(l.z39.n38.q43 | 0);
-      if (typeof K === 'undefined' || !K._16 || !l || !l.z39) return;
-      var mx = (typeof q !== 'undefined' && q.mX != null) ? q.mX : l.z39.b6;
-      var my = (typeof q !== 'undefined' && q.mY != null) ? q.mY : l.z39.b7;
-      var atk = ATTACK[it.h44] || it.u41 || 25;
-      K._16(l.z39.b6, l.z39.b7, mx, my, atk);
-    } catch (e) {}
+      var px = l.z39.b6, py = l.z39.b7;
+      if (typeof px !== 'number' || typeof py !== 'number') return;
+      var mx = (typeof q !== 'undefined' && typeof q.mX === 'number') ? q.mX : px;
+      var my = (typeof q !== 'undefined' && typeof q.mY === 'number') ? q.mY : py;
+      var atk = ATTACK[it.h44] || 25;
+      K._16(px, py, mx, my, atk);
+    } catch (e) {
+      console.warn('[diggerz] attack inject', e);
+    }
   }, true);
 
   var n = 0, profileSent = false;
@@ -169,9 +176,9 @@ const FORCE_HOST_INJECT = `
       if (typeof l !== 'undefined') { l.a44 = true; l.a45 = true; }
       if (typeof q !== 'undefined' && q.player && typeof l !== 'undefined' && l.z39) {
         if (!q.player.l9) q.player.l9 = 90;
-        l.z39.l9 = 0.45 + 1.1 * (q.player.l9 || 90) / 100;
+        try { l.z39.l9 = 0.45 + 1.1 * (q.player.l9 || 90) / 100; } catch (e2) {}
       }
-      autoSelectTool();
+      autoSelectToolOnce();
     } catch (e) {}
     if (++n > 160) clearInterval(t);
   }, 250);
@@ -299,5 +306,5 @@ wss.on('connection', (ws) => {
 
 server.listen(PORT, () => {
   console.log('diggerz-server on :' + PORT);
-  console.log('ONLINE + tool equip inject + chat bubbles');
+  console.log('ONLINE + safe tool inject (no fake j35)');
 });
