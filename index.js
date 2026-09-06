@@ -100,10 +100,7 @@ const FORCE_HOST_INJECT = `
         if (!q.player.l9) q.player.l9 = 90;
         l.z39.l9 = 0.45 + 1.1 * (q.player.l9 || 90) / 100;
       }
-      if (typeof l !== 'undefined') {
-        l.a44 = true;
-        l.a45 = true;
-      }
+      if (typeof l !== 'undefined') { l.a44 = true; l.a45 = true; }
       if (typeof K !== 'undefined' && K.a15 && typeof l !== 'undefined' && l.z39 && l.z39.n38 && l.z39.n38.B30) {
         var slots = l.z39.n38.B30;
         for (var i = 0; i < slots.length; i++) {
@@ -134,16 +131,31 @@ function forceOnlineClient(html) {
       'Wj.create((location.protocol==="https:"?"wss://":"ws://")+a+(location.port?":"+location.port:""), ["" + c], null, !1);'
     );
   }
+  html = html.replace(
+    'function svc(){return window.Main&&window.Main.diggerzService?window.Main.diggerzService:null}',
+    'function svc(){if(window.Main&&window.Main.diggerzService)return window.Main.diggerzService;if(window.DiggerzOnlineAdmin)return window.DiggerzOnlineAdmin;return null}'
+  );
   return html;
 }
 
 function injectHtml(buf, offlineAllowed) {
   let html = buf.toString('utf8');
   if (!offlineAllowed) html = forceOnlineClient(html);
+  // Always load admin bridge (online + offline)
+  if (html.indexOf('admin-bridge.js') === -1) {
+    const tag = '<script src="/admin-bridge.js"></script>';
+    if (html.indexOf('<head>') !== -1) html = html.replace('<head>', '<head>' + tag, 1);
+    else html = tag + html;
+  }
   if (html.indexOf('id="diggerz-force-host"') === -1) {
     if (html.indexOf('<head>') !== -1) html = html.replace('<head>', '<head>' + FORCE_HOST_INJECT, 1);
     else html = FORCE_HOST_INJECT + html;
   }
+  // Offline mode also needs svc() fallback when diggerzService missing
+  html = html.replace(
+    'function svc(){return window.Main&&window.Main.diggerzService?window.Main.diggerzService:null}',
+    'function svc(){if(window.Main&&window.Main.diggerzService)return window.Main.diggerzService;if(window.DiggerzOnlineAdmin)return window.DiggerzOnlineAdmin;return null}'
+  );
   return Buffer.from(html, 'utf8');
 }
 
@@ -192,7 +204,7 @@ const wss = new WebSocketServer({
   handleProtocols: (protocols) => { const list = [...protocols]; return list.length ? list[0] : 'diggerz'; },
 });
 
-wss.on('connection', (ws, req) => {
+wss.on('connection', (ws) => {
   console.log('client connected', { players: room.players.size + 1 });
   room.addClient(ws);
   room.onOpen(ws);
@@ -206,5 +218,5 @@ wss.on('connection', (ws, req) => {
 
 server.listen(PORT, () => {
   console.log('diggerz-server on :' + PORT);
-  console.log('online-only inject active');
+  console.log('admin menu bridge active for all modes');
 });
