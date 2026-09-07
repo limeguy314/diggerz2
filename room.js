@@ -1,8 +1,9 @@
 'use strict';
+
 const { Packet, frame, guidKey, zeroGuid } = require('./packet');
 const { createWorld, tileAt, setTile } = require('./world');
 const { createPlayer, emptyItem, item } = require('./player');
-const APPEARANCE_FOR = { 326: 4, 240: 4, 248: 4, 79: 4, 93: 4, 328: 4, 247: 1 };
+
 const MINING = new Set([25, 21, 36, 40, 24, 27, 30, 32, 0, 1, 2, 3]);
 
 class Room {
@@ -10,156 +11,56 @@ class Room {
     this.name = name;
     this.world = createWorld(128, 80);
     this.players = new Map();
-    this.damage = new Map();
   }
+
   addClient(ws) {
     const player = createPlayer('Player');
-    player.ws = ws; player.selectedSlot = 1;
-    ws._player = player; ws._room = this;
+    player.ws = ws;
+    ws._player = player;
+    ws._room = this;
     this.players.set(guidKey(player.id), player);
     return player;
   }
+
   removeClient(ws) {
-    const player = ws._player; if (!player) return;
+    const player = ws._player;
+    if (!player) return;
     this.players.delete(guidKey(player.id));
-    this.broadcastPlayerDespawn(player);
+    this.broadcast(5, 1, (p) => this.writePlayerBody(p, player, true));
     player.ws = null;
   }
+
   send(ws, opcode, status, writeFn) {
     if (!ws || ws.readyState !== 1) return;
-    try { ws.send(frame(opcode, status, writeFn)); } catch (e) { console.error(e.message); }
+    try { ws.send(frame(opcode, status, writeFn)); } catch (e) { console.error('send', e.message); }
   }
+
   broadcast(opcode, status, writeFn, exceptWs) {
-    for (const p of this.players.values())
+    for (const p of this.players.values()) {
       if (p.ws && p.ws !== exceptWs) this.send(p.ws, opcode, status, writeFn);
+    }
   }
+
   onOpen(ws) { if (ws._player) this.sendLogin(ws, ws._player); }
+
   onMessage(ws, buffer) {
     const packet = Packet.from(buffer);
     const opcode = packet.Q9();
-    const player = ws._player; if (!player) return;
+    const player = ws._player;
+    if (!player) return;
     switch (opcode) {
-      case 2: this.handleOpcode2(ws, player, packet); break;
+      case 2: this.sendLogin(ws, player); break;
       case 4: this.sendWorldName(ws); this.sendWorld(ws); break;
       case 6: case 8: this.readMovement(player, packet, opcode); this.broadcastMovement(player, ws); break;
       case 11: this.build(ws, player, packet); break;
       case 12: this.chat(ws, player, packet); break;
-      case 14: this.sendInventory(ws, player); break;
+      case 14: case 52: case 281: this.sendInventory(ws, player); break;
       case 18: this.finishJoin(ws, player); break;
-      case 28: this.swap(ws, player, packet); break;
       case 33: this.equip(ws, player, packet); break;
-      case 52: case 281: this.sendInventory(ws, player); break;
-      case 199:
-        this.readProfile(player, packet);
-        if (player.ready) this.pushLoadout(ws, player);
-        break;
-      case 250: this.adminCommand(ws, player, packet); break;
       case 287: this.digOrAttack(ws, player, packet); break;
     }
   }
-  handleOpcode2(ws, player, packet) {
-    if (packet.remaining() >= 4) {
-      const field = packet.Q9();
-      if (field === 2 && packet.remaining() > 8) this.readIdentity(player, packet);
-    }
-    this.sendLogin(ws, player);
-  }
-  readIdentity(player, packet) {
-    try {
-      packet.r5(); packet.r5();
-      const name = packet.r5();
-      packet.r5(); packet.r5();
-      const skinScale = packet.Q4();
-      const flagL0 = packet.Q7();
-      if (name && String(name).trim() && name !== 'Enter Name')
-        player.name = String(name).trim().slice(0, 24);
-      if (isFinite(skinScale) && skinScale > 0.2 && skinScale < 3) player.skinScale = skinScale;
-      player.flagL0 = flagL0 | 0;
-    } catch (e) {}
-  }
-  readProfile(player, packet) {
-    try {
-      if (packet.Q7() !== 1) return;
-      player.coins = Math.max(0, packet.Q7() | 0);
-      const appLen = Math.min(16, Math.max(0, packet.Q7() | 0));
-      const appearance = [];
-      for (let i = 0; i < appLen; i++) appearance.push(packet.Q9() & 0xffff);
-      while (appearance.length < 11) appearance.push(0);
-      player.appearance = appearance.slice(0, 11);
-      const slotCount = Math.min(30, Math.max(0, packet.Q7() | 0));
-      const slots = [];
-      for (let i = 0; i < 30; i++) slots.push(emptyItem());
-      for (let i = 0; i < slotCount; i++) {
-        const category = packet.r1();
-        const packed = packet.Q9();
-        const count = packet.Q9();
-        const extra = packet.Q9();
-        slots[i] = item(category, packed & 2047, (packed >> 11) & 31, count, extra, '');
-      }
-      player.slots = slots;
-      player.profileReceived = true;
-      this.ensureStarterKit(player);
-    } catch (e) { console.error('profile', e.message); }
-  }
-  ensureStarterKit(player) {
-    if (!player.slots) player.slots = [];
-    while (player.slots.length < 30) player.slots.push(emptyItem());
-    const hasTool = player.slots.some((s) => s && s.category === 2 && s.count > 0);
-    const hasBlock = player.slots.some((s) => s && s.category === 1 && s.count > 0);
-    if (!hasTool) {
-      player.slots[0] = item(2, 326, 1, 1, 0, '');
-      player.slots[1] = item(2, 240, 0, 1, 0, '');
-    }
-    if (!hasBlock) {
-      player.slots[2] = item(1, 100, 0, 64, 0, '');
-      player.slots[3] = item(1, 108, 0, 64, 0, '');
-    }
-    const pick = player.slots.findIndex((s) => s.category === 2 && s.id === 240 && s.count > 0);
-    if (pick >= 0) player.selectedSlot = pick;
-  }
-  pushLoadout(ws, player) {
-    this.ensureStarterKit(player);
-    this.sendPlayer(ws, player);
-    this.sendInventory(ws, player);
-    this.sendCoins(ws, player);
-    this.broadcast(5, 1, (p) => this.writePlayerBody(p, player), ws);
-  }
-  finishJoin(ws, player) {
-    this.ensureStarterKit(player);
-    player.x = 12;
-    player.y = this.world.surface - 2;
-    this.sendPlayer(ws, player);
-    this.sendInventory(ws, player);
-    this.sendAccess(ws);
-    this.sendCoins(ws, player);
-    setTimeout(() => {
-      if (player.ws) {
-        this.ensureStarterKit(player);
-        this.sendAccess(player.ws);
-        this.sendInventory(player.ws, player);
-        this.sendPlayer(player.ws, player);
-      }
-    }, 400);
-    setTimeout(() => {
-      if (player.ws) {
-        this.sendAccess(player.ws);
-        this.sendInventory(player.ws, player);
-      }
-    }, 1200);
-    this.message(ws, '^2Online unlocked. ^7Keys 1-9 equip. Click to dig/shoot. /name YourName');
-    player.ready = true;
-    this.syncPeers(ws, player);
-  }
-  syncPeers(ws, joiner) {
-    for (const other of this.players.values()) {
-      if (!other.ready || other === joiner) continue;
-      this.sendPlayerTo(ws, other);
-      if (other.ws) this.sendPlayerTo(other.ws, joiner);
-    }
-  }
-  broadcastPlayerDespawn(player) {
-    this.broadcast(5, 1, (p) => this.writePlayerBody(p, player, { hidden: true }));
-  }
+
   sendLogin(ws, player) {
     this.send(ws, 2, 1, (p) => {
       p.R8(player.id); p.R8(player.pocketId); p.R8(player.zeroId);
@@ -167,7 +68,9 @@ class Room {
       for (let i = 0; i < 7; i++) p.R8(zeroGuid());
     });
   }
+
   sendWorldName(ws) { this.send(ws, 95, 1, (p) => p.R9(this.name)); }
+
   sendWorld(ws) {
     const s = this.world;
     this.send(ws, 4, 1, (p) => {
@@ -187,8 +90,8 @@ class Room {
       }
     });
   }
-  writePlayerBody(p, player, opts = {}) {
-    const hidden = !!opts.hidden;
+
+  writePlayerBody(p, player, hidden) {
     p.R8(player.id);
     p.R9(player.name || 'Player');
     p.r8(player.x); p.r8(0); p.r8(player.y); p.r8(0);
@@ -202,8 +105,9 @@ class Room {
     p.r8(player.skinScale != null ? player.skinScale : 1.44);
     p.r8(hidden ? 0 : 1);
   }
-  sendPlayer(ws, player) { this.send(ws, 5, 1, (p) => this.writePlayerBody(p, player)); }
-  sendPlayerTo(ws, player) { this.send(ws, 5, 1, (p) => this.writePlayerBody(p, player)); }
+
+  sendPlayer(ws, player) { this.send(ws, 5, 1, (p) => this.writePlayerBody(p, player, false)); }
+
   sendInventory(ws, player) {
     this.send(ws, 14, 1, (p) => {
       p.R8(player.id); p.R4(0);
@@ -219,20 +123,33 @@ class Room {
       p.R2(0);
     });
   }
-  sendAccess(ws) {
-    this.send(ws, 143, 1, (p) => { p.s0(true); p.s0(true); });
-  }
+
+  sendAccess(ws) { this.send(ws, 143, 1, (p) => { p.s0(true); p.s0(true); }); }
   sendCoins(ws, player) { this.send(ws, 17, 1, (p) => p.R0(player.coins | 0)); }
-  sendTile(x, y, id, variant = 0) {
-    this.broadcast(11, 1, (p) => {
-      p.R2(1); p.R0(x | 0); p.R0(0); p.R0(y | 0);
-      p.R2((id & 2047) | ((variant & 31) << 11));
-    });
-  }
-  sendHit(x, y, stage) {
-    this.broadcast(68, 1, (p) => { p.r8(x); p.r8(0); p.r8(y); p.R0(stage | 0); });
-  }
   message(ws, text) { this.send(ws, 13, 1, (p) => { p.R4(0); p.R9(text); }); }
+
+  finishJoin(ws, player) {
+    player.x = 12;
+    player.y = this.world.surface - 2;
+    this.sendPlayer(ws, player);
+    this.sendInventory(ws, player);
+    this.sendAccess(ws);
+    this.sendCoins(ws, player);
+    this.message(ws, '^2Connected to server. WASD move.');
+    player.ready = true;
+    for (const other of this.players.values()) {
+      if (!other.ready || other === player) continue;
+      this.send(ws, 5, 1, (p) => this.writePlayerBody(p, other, false));
+      if (other.ws) this.send(other.ws, 5, 1, (p) => this.writePlayerBody(p, player, false));
+    }
+    setTimeout(() => {
+      if (player.ws) {
+        this.sendAccess(player.ws);
+        this.sendInventory(player.ws, player);
+      }
+    }, 500);
+  }
+
   readMovement(player, packet, opcode) {
     try {
       if (opcode === 8) {
@@ -247,6 +164,7 @@ class Room {
       }
     } catch (e) {}
   }
+
   broadcastMovement(player, exceptWs) {
     this.broadcast(6, 1, (p) => {
       p.R8(player.id);
@@ -254,36 +172,18 @@ class Room {
       p.R2(0); p.R4(0); p.R4(0); p.R2(0); p.R2(0);
     }, exceptWs);
   }
+
   equip(ws, player, packet) {
-    let slot = 0;
-    try { slot = packet.Q7() | 0; } catch (e) { this.sendInventory(ws, player); return; }
-    this.ensureStarterKit(player);
-    if (slot < 0 || slot >= player.slots.length) { this.sendInventory(ws, player); return; }
-    const it = player.slots[slot];
-    if (!it || !it.count) { this.sendInventory(ws, player); return; }
-    player.selectedSlot = slot;
-    if (it.category === 2) {
-      const appSlot = APPEARANCE_FOR[it.id];
-      if (appSlot != null) {
-        if (!player.appearance) player.appearance = [0, 247, 0, 0, 326, 0, 0, 0, 0, 0, 0];
-        player.appearance[appSlot] = it.id;
-      }
-    }
-    this.sendInventory(ws, player);
-    this.sendPlayer(ws, player);
-    this.broadcast(5, 1, (p) => this.writePlayerBody(p, player), ws);
-    setTimeout(() => { if (player.ws) this.sendInventory(player.ws, player); }, 100);
-  }
-  swap(ws, player, packet) {
     try {
-      packet.Q6(); const from = packet.Q9(); packet.Q6(); const to = packet.Q9();
-      if (from < 0 || to < 0 || from >= player.slots.length || to >= player.slots.length) return;
-      const hold = player.slots[from];
-      player.slots[from] = player.slots[to];
-      player.slots[to] = hold;
-      this.sendInventory(ws, player);
-    } catch (e) { this.sendInventory(ws, player); }
+      const slot = packet.Q7() | 0;
+      if (slot >= 0 && slot < (player.slots || []).length) {
+        const it = player.slots[slot];
+        if (it && it.count) player.selectedSlot = slot;
+      }
+    } catch (e) {}
+    this.sendInventory(ws, player);
   }
+
   build(ws, player, packet) {
     try {
       packet.Q4(); packet.Q4(); packet.Q4(); packet.Q4();
@@ -298,7 +198,7 @@ class Room {
       if (tileAt(this.world, x, y)) return;
       let itemRef = player.slots[slot];
       if (!itemRef || itemRef.category !== 1 || itemRef.count <= 0) {
-        const idx = player.slots.findIndex((s) => s.category === 1 && s.count > 0 && (!id || s.id === id));
+        const idx = player.slots.findIndex((s) => s.category === 1 && s.count > 0);
         if (idx < 0) return;
         itemRef = player.slots[idx];
       }
@@ -309,10 +209,14 @@ class Room {
       }
       const placeId = id || itemRef.id;
       setTile(this.world, x, y, placeId);
-      this.sendTile(x, y, placeId, variant || itemRef.variant || 0);
+      this.broadcast(11, 1, (p) => {
+        p.R2(1); p.R0(x | 0); p.R0(0); p.R0(y | 0);
+        p.R2((placeId & 2047) | ((variant & 31) << 11));
+      });
       this.sendInventory(ws, player);
     } catch (e) { console.error('build', e.message); }
   }
+
   chat(ws, player, packet) {
     let text = '';
     try { text = packet.r5(); } catch (e) {}
@@ -320,31 +224,24 @@ class Room {
     if (m) {
       player.name = String(m[1]).slice(0, 24);
       this.message(ws, '^2Name set to ' + player.name);
-      this.pushLoadout(ws, player);
+      this.sendPlayer(ws, player);
+      this.broadcast(5, 1, (p) => this.writePlayerBody(p, player, false), ws);
       return;
     }
     if (!text) return;
     text = String(text).slice(0, 120);
-    // Opcode 12 → client v39 → chat bubble above head
     for (const p of this.players.values()) {
       if (!p.ws) continue;
-      this.send(p.ws, 12, 1, (pkt) => {
-        pkt.R8(player.id);
-        pkt.R9(text);
-      });
+      this.send(p.ws, 12, 1, (pkt) => { pkt.R8(player.id); pkt.R9(text); });
     }
   }
+
   digOrAttack(ws, player, packet) {
     let attackX, attackY, toX, toY, attackType;
     try {
       attackX = packet.Q4(); attackY = packet.Q4();
       toX = packet.Q4(); toY = packet.Q4();
       attackType = packet.r1();
-      if (packet.remaining() >= 4) {
-        const sel = packet.Q7();
-        if (sel >= 0 && sel < (player.slots || []).length) player.selectedSlot = sel;
-      }
-      if (packet.remaining() >= 16) { try { packet.Q6(); } catch (e) {} }
     } catch (e) { return; }
     const isMining = MINING.has(attackType);
     let tx = Math.round(toX), ty = Math.round(toY);
@@ -352,8 +249,8 @@ class Room {
     if (!tileAt(this.world, tx, ty)) {
       const px = Math.round(player.x), py = Math.round(player.y);
       let best = null, bestD = 99;
-      for (let dy = -4; dy <= 4; dy++)
-        for (let dx = -4; dx <= 4; dx++) {
+      for (let dy = -3; dy <= 3; dy++)
+        for (let dx = -3; dx <= 3; dx++) {
           const x = px + dx, y = py + dy;
           if (tileAt(this.world, x, y)) {
             const d = dx * dx + dy * dy;
@@ -370,132 +267,15 @@ class Room {
       };
       this.send(ws, 287, 1, writeShot);
       this.broadcast(287, 1, writeShot, ws);
-      this.weaponTerrain(player, attackX, attackY, toX, toY, attackType);
       return;
     }
     if (!hasTile) return;
-    const minedId = tileAt(this.world, tx, ty);
     setTile(this.world, tx, ty, 0);
-    this.sendHit(tx, ty, 5);
-    this.sendTile(tx, ty, 0);
-    if (minedId) {
-      let stacked = false;
-      for (let i = 0; i < player.slots.length; i++) {
-        const s = player.slots[i];
-        if (s.category === 1 && s.id === minedId && s.count > 0) {
-          s.count = Math.min(999, s.count + 1);
-          stacked = true;
-          break;
-        }
-      }
-      if (!stacked) {
-        for (let i = 0; i < player.slots.length; i++) {
-          if (!player.slots[i].count) {
-            player.slots[i] = item(1, minedId, 0, 1, 0, '');
-            break;
-          }
-        }
-      }
-      this.sendInventory(ws, player);
-    }
-  }
-  weaponTerrain(player, fromX, fromY, toX, toY, attackType) {
-    const px = player.x, py = player.y;
-    let dx = toX - px, dy = toY - py;
-    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-    dx /= dist; dy /= dist;
-    let range = 6;
-    if ([20, 22, 23, 29, 31, 33, 35, 37, 39].includes(attackType)) range = 12;
-    let broken = 0;
-    const steps = Math.max(4, Math.ceil(range * 2));
-    for (let s = 1; s <= steps; s++) {
-      const t = (s / steps) * range;
-      const tx = Math.round(px + dx * t), ty = Math.round(py + dy * t);
-      if (tileAt(this.world, tx, ty)) {
-        setTile(this.world, tx, ty, 0);
-        this.sendTile(tx, ty, 0);
-        if (++broken >= 4) break;
-      }
-    }
-  }
-  adminCommand(ws, player, packet) {
-    let text = '';
-    try { text = packet.r5(); } catch (e) { return; }
-    let data;
-    try { data = JSON.parse(text); } catch (e) { return; }
-    if (!data || !data.op) return;
-    player.adminAuthed = true;
-    switch (data.op) {
-      case 'give': {
-        const category = data.category | 0;
-        const id = data.id | 0;
-        const count = Math.max(1, Math.min(999, data.count | 0));
-        if ((category !== 1 && category !== 2) || id <= 0) break;
-        let placed = false;
-        for (let i = 0; i < player.slots.length; i++) {
-          const s = player.slots[i];
-          if (s.category === category && s.id === id) {
-            s.count = Math.min(999, (s.count || 0) + count);
-            placed = true;
-            break;
-          }
-        }
-        if (!placed) {
-          for (let i = 0; i < player.slots.length; i++) {
-            if (!player.slots[i].count) {
-              player.slots[i] = item(category, id, 0, count, 0, '');
-              placed = true;
-              break;
-            }
-          }
-        }
-        this.sendInventory(ws, player);
-        this.message(ws, '^2Admin: gave item ' + id + ' x' + count);
-        break;
-      }
-      case 'coins': {
-        const amount = Math.max(1, Math.min(1000000, data.amount | 0));
-        player.coins = (player.coins || 0) + amount;
-        this.sendCoins(ws, player);
-        this.message(ws, '^2Admin: +' + amount + ' coins (total ' + player.coins + ')');
-        break;
-      }
-      case 'kill': {
-        const name = String(data.name || '');
-        for (const p of this.players.values()) {
-          if (!name || p.name === name) {
-            p.x = 12;
-            p.y = this.world.surface - 2;
-            if (p.ws) {
-              this.sendPlayer(p.ws, p);
-              this.message(p.ws, '^1Admin kill — respawned');
-            }
-            if (name) break;
-          }
-        }
-        break;
-      }
-      case 'tp': {
-        const name = String(data.name || '');
-        let target = player;
-        for (const p of this.players.values()) {
-          if (p.name === name) { target = p; break; }
-        }
-        player.x = target.x;
-        player.y = target.y;
-        this.sendPlayer(ws, player);
-        this.broadcastMovement(player, null);
-        this.message(ws, '^2Admin: teleported to ' + target.name);
-        break;
-      }
-      case 'pvp': {
-        this.pvpEnabled = !!data.enabled;
-        for (const p of this.players.values()) {
-          if (p.ws) this.message(p.ws, this.pvpEnabled ? '^1ADMIN: PVP ENABLED' : '^2ADMIN: PVP SAFE');
-        }
-        break;
-      }
-    }
+    this.broadcast(68, 1, (p) => { p.r8(tx); p.r8(0); p.r8(ty); p.R0(5); });
+    this.broadcast(11, 1, (p) => {
+      p.R2(1); p.R0(tx | 0); p.R0(0); p.R0(ty | 0); p.R2(0);
+    });
   }
 }
+
 module.exports = { Room };
