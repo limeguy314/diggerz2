@@ -18281,13 +18281,14 @@ $jscomp.polyfill("Array.prototype.find", function(ca) {
         q.children.push(a);
         0 == l.a48 && (0 <= q.SERVER_ADDRESS.indexOf("server") ? (l.a48 = 80,
         l.a49 = V.B10(1E4, 10015)) : l.a48 = l.a49 = 1E4);
-        var useLocalDigTrade = l.A46 || q.diggerzDigTradeRequested === !0 || q.diggerzPvpRequested === !0;
-        useLocalDigTrade && (l.A46 = !0);
+        var useLocalDigTrade = l.A46 || q.diggerzDigTradeRequested === !0;
         var usePvpTest = q.diggerzPvpRequested === !0;
+        q.diggerzPvpRequested = !1;
         q.diggerzDigTradeRequested = !1;
         q.diggerzShopRequested = !1;
-        q.diggerzConnectionRoute = usePvpTest ? (q.diggerzPeerMode === "digtrade" ? "Build 22.11 server Dig+Trade" : "Build 22.11 server PvP") : (useLocalDigTrade ? "local Dig+Trade" : "original multiplayer server");
-        this.R36 = useLocalDigTrade ? new DiggerzService(this, usePvpTest ? "pvp" : "digtrade") : new Cr(q.SERVER_ADDRESS,l.a48,l.a49);
+        q.diggerzConnectionRoute = usePvpTest ? "Build 22.14 native-packet PvP" : (useLocalDigTrade ? "Build 22.14 native-packet Dig+Trade" : "original multiplayer server");
+        this.R36 = usePvpTest ? new DiggerzService(this, "pvp") : (useLocalDigTrade ? new DiggerzService(this, "digtrade") : new Cr(q.SERVER_ADDRESS,l.a48,l.a49));
+        try { if (window.DiggerzMpDebugLog) window.DiggerzMpDebugLog("MP-071", "R36=" + (this.R36 && this.R36.constructor ? this.R36.constructor.name : "?") + " mode=" + (this.R36 && this.R36.mode || "?") + " A46=" + l.A46 + " route=" + q.diggerzConnectionRoute) } catch (_debugError) {}
         this.R35 = new zo;
         this.R35.B8 = 8;
         q.children.push(this.R35);
@@ -22114,7 +22115,7 @@ $jscomp.polyfill("Array.prototype.find", function(ca) {
         this.hazardCooldown = 0;
         this.lastDigTick = -9999;
         this.adminPvpEnabled = false;
-        this.playerId = this.mode === "pvp" ? this.guid((Math.random()*4294967296)|0,(Math.random()*4294967296)|0,(Math.random()*4294967296)|0,(Math.random()*4294967296)|0) : this.guid(1145655898, 1229212756, 1380275020, 1162690898);
+        this.playerId = (this.mode === "pvp" || this.mode === "digtrade") ? this.guid((Math.random()*4294967296)|0,(Math.random()*4294967296)|0,(Math.random()*4294967296)|0,(Math.random()*4294967296)|0) : this.guid(1145655898, 1229212756, 1380275020, 1162690898);
         this.pocketId = this.guid(1347374923, 1162627412, 1230193988, 1096040772);
         this.zeroId = this.guid(0, 0, 0, 0);
         // Build 21.17 combat test target. Damage/HP live in the local service, while
@@ -22151,6 +22152,16 @@ $jscomp.polyfill("Array.prototype.find", function(ca) {
         // the active Dig+Trade service pointer used by the in-game HUD/shop.
         if (this.mode !== "shopmenu") q.diggerzService = this;
         q.diggerzSaveAvailable = this.saveAvailable;
+        if (this.mode === "pvp" || this.mode === "digtrade") {
+            var autoMode = this.mode;
+            setTimeout(function() {
+                try {
+                    if (window.DiggerzBeginBackgroundMatchmaking) window.DiggerzBeginBackgroundMatchmaking(autoMode, null)
+                } catch (error) {
+                    console.error("Diggerz multiplayer background start failed", error)
+                }
+            }, 0)
+        }
     };
     q.DiggerzService = DiggerzService;
     // Build 22.7: expose the minimum recovered runtime surface needed by the
@@ -22482,6 +22493,31 @@ $jscomp.polyfill("Array.prototype.find", function(ca) {
             readable.s4(packet.Q1);
             readable.s1();
             this.incoming.push(readable)
+        },
+        // Build 22.14: expose the recovered packet format without exposing the
+        // rest of the generated runtime.  Multiplayer can now send/receive the
+        // same opcode-framed byte streams consumed by R33.z37().
+        buildNativePacket: function(opcode, status, write) {
+            var packet = new tb;
+            packet.R2(opcode);
+            packet.R2(status == null ? 1 : status);
+            if (write) write(packet);
+            return packet
+        },
+        injectNativePacket: function(buffer) {
+            if (!buffer || this.closed) return !1;
+            try {
+                var raw = buffer instanceof ArrayBuffer ? buffer :
+                    buffer.buffer.slice(buffer.byteOffset || 0, (buffer.byteOffset || 0) + buffer.byteLength);
+                var readable = new tb;
+                readable.s4(Ya.ofData(raw));
+                readable.s1();
+                this.incoming.push(readable);
+                return !0
+            } catch (error) {
+                console.error("Diggerz native packet inject failed", error);
+                return !1
+            }
         },
         message: function(text) {
             this.enqueue(13, 1, function(packet) {
@@ -86928,11 +86964,11 @@ $jscomp.polyfill("Array.prototype.find", function(ca) {
             this.D54 = !1)
         },
         e54: function() {
-            // Build 22.11: Private uses the same automatic Battle matchmaking path.
+            // Build 22.14: Private uses the same automatic Battle matchmaking path.
             this.e56(null)
         },
         e55: function() {
-            // Legacy private-code entry is intentionally retired in Build 22.11.
+            // Legacy private-code entry is intentionally retired in Build 22.14.
             this.e56(null)
         },
         e56: function(a) {
@@ -86940,43 +86976,36 @@ $jscomp.polyfill("Array.prototype.find", function(ca) {
                 q.OpenRecoveredShop(this);
                 return
             }
-            if ("clicked" == this._1)
-                return;
-            if ("Enter Name" == this.d52.q35 || 3 > this.d52.q35.length) {
-                E.u4(this.d52._2, 0, 200, 1, .5);
-                return
-            }
-            // Preserve the proven Build 21.17 title -> game transition. Networking is
-            // background-only and is never allowed to block entering the map.
-            this._1 = "clicked";
-            q.player.l7 = !1;
-            l.A45 = !1;
-            l.A46 = !0;
-            l.A47 = !1;
-            l.A48 = !1;
-            l.A40 = null;
-            q.diggerzPvpRequested = !0;
-            q.diggerzPeerMode = "freedig" == a ? "digtrade" : "pvp";
-            q.diggerzDigTradeRequested = !1;
-            q.diggerzShopRequested = !1;
-            window.document.getElementById("info").style.visibility = "visible";
-            window.document.getElementById("changes").style.visibility = "visible";
-            window.document.getElementById("diggerz-io_300x250").style.visibility = "hidden";
-            q.thisMain.userName = this.d52.q35;
-            q.SaveGlobals();
-            q.mClicked = !1;
-            this.d52.a0 = 1;
-            this.F6(5, 1, 0, 1E3);
-            this.F8(2, 1);
-            if (window.DiggerzBeginBackgroundMatchmaking) {
-                try {
-                    window.DiggerzBeginBackgroundMatchmaking(q.diggerzPeerMode, this)
-                } catch (error) {
-                    console.error("Diggerz multiplayer background start failed", error)
-                }
-            }
-            this.a0 = 1;
-            q.InitMainGame()
+            "clicked" != this._1 && ("Enter Name" == this.d52.q35 || 3 > this.d52.q35.length ? E.u4(this.d52._2, 0, 200, 1, .5) : (this._1 = "clicked",
+            q.player.l7 = !1,
+            l.A45 = !1,
+            l.A46 = !1,
+            q.diggerzPvpRequested = "freedig" != a,
+            q.diggerzPeerMode = "freedig" == a ? "digtrade" : "pvp",
+            q.diggerzDigTradeRequested = "freedig" == a,
+            q.diggerzShopRequested = "shop" == a,
+            "shop" == a ? (l.A40 = null,
+            l.A45 = !0) : "freedig" == a && (l.A40 = null,
+            l.A46 = !0),
+            window.document.getElementById("info").style.visibility = "visible",
+            window.document.getElementById("changes").style.visibility = "visible",
+            window.document.getElementById("diggerz-io_300x250").style.visibility = "hidden",
+            a = db.getTimer() | 0,
+            !Cf.E53 && (3E5 < a - Cf.E54 || 0 == Cf.E54) ? (Cf.E53 = !1,
+            Cf.E54 = a,
+            window.document.getElementById("preroll").style.visibility = "visible",
+            aiptag.cmd.player.push(function() {
+                adplayer.startPreRoll()
+            })) : (Cf.E53 = !1,
+            this._1 = "clicked",
+            q.thisMain.userName = this.d52.q35,
+            q.SaveGlobals(),
+            q.mClicked = !1,
+            this.d52.a0 = 1,
+            this.F6(5, 1, 0, 1E3),
+            this.F8(2, 1),
+            this.a0 = 1,
+            q.InitMainGame())))
         },
         e58: function() {
             var a = new Op;
@@ -114923,7 +114952,7 @@ $jscomp.polyfill("Array.prototype.find", function(ca) {
 	</div>
 
 	<div id="a_desc" style="text-shadow: 2px 2px 2px black; font-weight: bold; text-align: center; color: white; position: absolute; top: 25px; left: 50%; z-index: 100; transform: translate(-50%, -50%);">2D battle royale game with building!<br/>Instructions: WASD to move. Use mouse to aim, dig, and pick weapons.</div>
-	<div id="a_ver" style="opacity: 0.5; text-shadow: 2px 2px 2px black; font-weight: bold; text-align: center; color: white; position: absolute; top: 5px; left: 14px; z-index: 100;">Build 22.7 ONLINE MULTIPLAYER TEST</div>
+	<div id="a_ver" style="opacity: 0.5; text-shadow: 2px 2px 2px black; font-weight: bold; text-align: center; color: white; position: absolute; top: 5px; left: 14px; z-index: 100;">Build 22.14</div>
 	<div id="a_changes" style="opacity: 0.5; text-shadow: 2px 2px 2px black; font-weight: bold; text-align: center; color: white; position: absolute; top: 25px; left: 14px; z-index: 100;"><a style="color: white; text-decoration: none;" href="#changes">Change Log</a></div>
 	<div id="a_info" style="opacity: 0.5; text-shadow: 2px 2px 2px black; font-weight: bold; text-align: center; color: white; position: absolute; top: 45px; left: 14px; z-index: 100;"><a style="color: white; text-decoration: none;" href="#info">Information</a></div>
 
@@ -115178,23 +115207,47 @@ $jscomp.polyfill("Array.prototype.find", function(ca) {
 #diggerz-pvp22 .room{font:800 30px monospace;letter-spacing:4px;background:#080b12;border:1px solid #495776;padding:12px;text-align:center;border-radius:6px;user-select:all}
 #diggerz-pvp22 .tiny{font-size:12px;color:#9eabc6}
 #diggerz-pvp22 .serverline{padding:10px 12px;border-radius:6px;background:#0a1020;border:1px solid #263552;margin:12px 0}
+#diggerz-mp-debug{display:none;position:fixed;right:10px;bottom:10px;width:min(520px,46vw);max-height:46vh;z-index:2147483000;background:rgba(4,8,14,.96);color:#d8e9ff;border:1px solid #4d6d91;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.55);font:12px/1.35 monospace;text-align:left}
+#diggerz-mp-debug .head{display:flex;align-items:center;gap:6px;padding:7px 8px;background:#101a27;border-bottom:1px solid #354b66;font-weight:bold}
+#diggerz-mp-debug .head span{flex:1}
+#diggerz-mp-debug button{font:11px monospace;padding:3px 7px;cursor:pointer}
+#diggerz-mp-debug-log{padding:8px;overflow:auto;max-height:34vh;white-space:pre-wrap;word-break:break-word}
+#diggerz-mp-debug-summary{padding:6px 8px;border-top:1px solid #27394f;color:#9fc8ff;white-space:pre-wrap}
+
 </style>
 <div id="diggerz-pvp22">
  <div class="box">
-  <h2>Build 22.11 — Online Multiplayer</h2>
-  <p>Automatic multiplayer connection status.</p>
+  <h2>Build 22.14 — Native Diggerz Packet Test</h2>
+  <p>Diagnostic multiplayer test. The debug box shows WebSocket room assignment, local-service flags, and native packet 5/6 traffic.</p>
   <input id="pvp22-server-url" type="hidden" value="">
   <div id="diggerz-pvp22-status">Multiplayer idle.</div>
   <div class="tabs"><button id="pvp22-close">CANCEL</button></div>
-  <p class="tiny">No room codes. No host/join setup. Battle pairs with Battle; Dig+Trade pairs with Dig+Trade.</p>
+  <p class="tiny">No room codes. The server only matches players and relays bytes; Diggerz itself now processes remote spawn/movement packets.</p>
  </div>
+</div>
+
+<div id="diggerz-mp-debug">
+ <div class="head"><span>MP DEBUG 22.14</span><button id="diggerz-mp-copy">COPY</button><button id="diggerz-mp-clear">CLEAR</button><button id="diggerz-mp-hide">HIDE</button></div>
+ <div id="diggerz-mp-debug-log">[MP-000] Debug console ready.</div>
+ <div id="diggerz-mp-debug-summary">mode=idle | socket=none | room=none</div>
 </div>
 <script>
 (function(){
-  var P=window.DiggerzPvp22={socket:null,service:null,queue:[],connected:false,joined:false,starting:false,mode:'pvp',menu:null,hooksInstalled:false,room:'',requested:false,everOpened:false,intentionalClose:false};
+  var P=window.DiggerzPvp22={socket:null,service:null,queue:[],nativeQueue:[],connected:false,joined:false,starting:false,mode:'pvp',menu:null,hooksInstalled:false,room:'',requested:false,everOpened:false,intentionalClose:false,nativeSpawnSeen:false,nativeMoveSeen:false,debugLines:[]};
   var overlay=document.getElementById('diggerz-pvp22'),status=document.getElementById('diggerz-pvp22-status');
   var serverInput=document.getElementById('pvp22-server-url');
-  function setStatus(t){status.textContent=t}
+  var debugBox=document.getElementById('diggerz-mp-debug'),debugLog=document.getElementById('diggerz-mp-debug-log'),debugSummary=document.getElementById('diggerz-mp-debug-summary');
+  function stamp(){try{return new Date().toISOString().slice(11,19)}catch(e){return ''}}
+  function serviceName(){try{return P.service?(P.service.constructor&&P.service.constructor.name||'DiggerzService')+'('+String(P.service.mode||'?')+')':'none'}catch(e){return 'error'}}
+  function updateDebugSummary(){if(!debugSummary)return;debugSummary.textContent='mode='+P.mode+' | socket='+socketState()+' | room='+(P.room||'none')+' | paired='+(P.connected?'yes':'no')+'\nservice='+serviceName()+' | A45='+(typeof l!=='undefined'?l.A45:'?')+' | A46='+(typeof l!=='undefined'?l.A46:'?')+' | route='+(typeof q!=='undefined'?(q.diggerzConnectionRoute||'?'):'?')}
+  function dbg(code,msg){var line='['+stamp()+'] ['+code+'] '+String(msg==null?'':msg);P.debugLines.push(line);if(P.debugLines.length>160)P.debugLines.shift();if(debugLog){debugLog.textContent=P.debugLines.join('\n');debugLog.scrollTop=debugLog.scrollHeight}if(debugBox)debugBox.style.display='block';updateDebugSummary();try{console.log('[Diggerz MP]',code,msg)}catch(e){}}
+  window.DiggerzMpDebugLog=dbg;
+  function setStatus(t){status.textContent=t;dbg('MP-STATUS',t)}
+  window.addEventListener('error',function(e){dbg('JS-001',(e.message||'window error')+' @ '+(e.filename||'?')+':'+(e.lineno||'?'))});
+  window.addEventListener('unhandledrejection',function(e){dbg('JS-002','Promise rejection: '+String(e.reason&&e.reason.stack||e.reason||'unknown'))});
+  document.getElementById('diggerz-mp-copy').onclick=function(){var t=P.debugLines.join('\n');try{navigator.clipboard.writeText(t);dbg('MP-090','debug log copied')}catch(e){dbg('MP-091','copy failed: '+e.message)}};
+  document.getElementById('diggerz-mp-clear').onclick=function(){P.debugLines=[];dbg('MP-000','debug log cleared')};
+  document.getElementById('diggerz-mp-hide').onclick=function(){debugBox.style.display='none'};
   function automaticServerUrl(){
     if(location.protocol==='https:')return 'wss://'+location.host;
     if(location.protocol==='http:')return 'ws://'+location.host;
@@ -115208,43 +115261,48 @@ $jscomp.polyfill("Array.prototype.find", function(ca) {
   function saveServerUrl(){if(location.protocol==='file:')try{localStorage.setItem('diggerzServerUrl',serverInput.value)}catch(e){}}
   function loadServerUrl(){serverInput.value=automaticServerUrl();var d=document.getElementById('pvp22-server-display');if(d)d.textContent='Diggerz server: '+serverInput.value}
   function closeSocket(intentional){var s=P.socket;P.intentionalClose=intentional!==false;P.socket=null;P.connected=false;P.joined=false;P.starting=false;P.everOpened=false;if(s)try{s.close(1000,'leaving lobby')}catch(e){}}
-  function setMode(mode){P.mode=mode==='digtrade'?'digtrade':'pvp'}
+  function setMode(mode){P.mode=mode==='digtrade'?'digtrade':'pvp';dbg('MP-001','mode selected: '+P.mode)}
   function show(side,mode){
     if(mode)setMode(mode);
-    P.requested=true;P.intentionalClose=false;overlay.style.display='none';
-    prepareMenu();
-    // Networking is background-only. The original game button handler owns map entry.
+    P.requested=true;P.intentionalClose=false;overlay.style.display='none';dbg('MP-002','background matchmaking requested');
+    installRuntimeHooks();
     connectMatchmaking();
   }
   function username(){try{return String(q.thisMain.userName||'Player').slice(0,24)}catch(e){return 'Player'}}
-  function sendRaw(m){var s=P.socket;if(s&&s.readyState===WebSocket.OPEN)try{s.send(JSON.stringify(m));return true}catch(e){}return false}
+  function sendRaw(m){var s=P.socket;if(s&&s.readyState===WebSocket.OPEN)try{s.send(JSON.stringify(m));if(m&&m.t)dbg('MP-TX-J',m.t+(m.mode?' mode='+m.mode:''));return true}catch(e){dbg('MP-062','JSON send failed: '+e.message)}return false}
+  function sendNativePacket(packet){var s=P.socket;if(!packet||!packet.Q1||!s||s.readyState!==WebSocket.OPEN)return false;try{var b=packet.Q1.b;var copy=b.buffer.slice(b.byteOffset,b.byteOffset+b.byteLength);var op=new DataView(copy).getUint16(0,true);s.send(copy);if(op===5||op===6)dbg(op===5?'MP-041':'MP-042','native packet '+op+' sent ('+copy.byteLength+' bytes)');return true}catch(e){dbg('MP-063','native send failed: '+e.message);console.error('Diggerz native packet send',e);return false}}
   P.send=function(m){return sendRaw(m)};
-  P.attach=function(service){P.service=service;while(P.queue.length)service.pvpReceive(P.queue.shift());if(service.pvpSendHello)service.pvpSendHello()};
+  P.sendNative=function(packet){return sendNativePacket(packet)};
+  P.attach=function(service){P.service=service;dbg('MP-070','game service attached: '+serviceName()+'; local/offline service='+(service&&service.constructor===DiggerzService?'YES':'NO'));while(P.queue.length)service.pvpReceive(P.queue.shift());while(P.nativeQueue.length)service.pvpReceiveNative(P.nativeQueue.shift());if(service.pvpSendHello)service.pvpSendHello();if(P.connected&&service.pvpSendNativeSpawn)service.pvpSendNativeSpawn()};
   P.detach=function(service){if(P.service===service)P.service=null};
   function routeGameMessage(m){try{if(P.service&&P.service.pvpReceive)P.service.pvpReceive(m);else P.queue.push(m)}catch(e){console.error('Diggerz server receive',e)}}
+  function routeNativePacket(buffer){try{if(P.service&&P.service.pvpReceiveNative)P.service.pvpReceiveNative(buffer);else P.nativeQueue.push(buffer)}catch(e){console.error('Diggerz native server receive',e)}}
   function serverAddress(){var u=(location.protocol==='http:'||location.protocol==='https:')?automaticServerUrl():normalizeServerUrl(serverInput.value);serverInput.value=u;saveServerUrl();var d=document.getElementById('pvp22-server-display');if(d)d.textContent='Diggerz server: '+u;return u}
   function socketState(){var s=P.socket;if(!s)return 'none';return ['CONNECTING','OPEN','CLOSING','CLOSED'][s.readyState]||String(s.readyState)}
   function connectMatchmaking(){
     if(!P.requested)return;
     closeSocket(true);P.intentionalClose=false;P.requested=true;P.connected=false;P.joined=false;P.room='';P.everOpened=false;
-    var url=serverAddress();setStatus((location.protocol==='file:'?'Connecting to the local Diggerz test server…':'Connecting to Diggerz multiplayer…')+'\nLooking for a '+(P.mode==='pvp'?'Battle':'Dig+Trade')+' player.');
-    var ws;try{ws=P.socket=new WebSocket(url)}catch(e){P.socket=null;setStatus('Could not reach the Diggerz multiplayer server. '+(e&&e.message||e));return}
+    var url=serverAddress();dbg('MP-010','WebSocket URL '+url);setStatus((location.protocol==='file:'?'Connecting to the local Diggerz test server…':'Connecting to Diggerz multiplayer…')+'\nLooking for a '+(P.mode==='pvp'?'Battle':'Dig+Trade')+' player.');
+    var ws;try{ws=P.socket=new WebSocket(url);ws.binaryType='arraybuffer'}catch(e){P.socket=null;setStatus('Could not reach the Diggerz multiplayer server. '+(e&&e.message||e));return}
     var openedAt=Date.now();
-    ws.onopen=function(){if(P.socket!==ws||!P.requested)return;P.everOpened=true;setStatus('Connected. Looking for another '+(P.mode==='pvp'?'Battle':'Dig+Trade')+' player…');sendRaw({t:'matchmake',mode:P.mode,name:username(),build:'22.11'})};
+    ws.onopen=function(){if(P.socket!==ws||!P.requested)return;P.everOpened=true;dbg('MP-011','socket OPEN after '+(Date.now()-openedAt)+'ms');setStatus('Connected. Looking for another '+(P.mode==='pvp'?'Battle':'Dig+Trade')+' player…');sendRaw({t:'matchmake',mode:P.mode,name:username(),build:'22.14'})};
     ws.onmessage=function(event){
-      if(P.socket!==ws)return;var m;try{m=JSON.parse(event.data)}catch(e){setStatus('Server sent invalid data.');return}if(!m||!m.t)return;
-      if(m.t==='server-hello')return;
-      if(m.t==='welcome'){P.joined=true;P.room=m.room||'';setStatus('Connected to '+(P.mode==='pvp'?'Battle':'Dig+Trade')+' server.');return}
-      if(m.t==='player-count'){if(m.count>=2&&!P.connected){P.connected=true;if(P.service&&P.service.pvpSendHello)P.service.pvpSendHello()}else if(m.count<2)P.connected=false;return}
-      if(m.t==='room-ready'){if(m.mode&&m.mode!==P.mode){setStatus('Server mode mismatch.');return}P.connected=true;if(P.service&&P.service.pvpSendHello)P.service.pvpSendHello();return}
-      if(m.t==='server-error'){P.connected=false;setStatus('Multiplayer server error: '+String(m.message||m.code||'Unknown error.'));return}
-      if(m.t==='peer-left'){P.connected=false;if(P.service&&P.service.message)P.service.message('^1OTHER PLAYER DISCONNECTED.');if(!P.starting)setStatus('The other player left. Looking for another player…');return}
-      if(m.t==='pong')return;routeGameMessage(m)
+      if(P.socket!==ws)return;
+      if(event.data instanceof ArrayBuffer){try{var op0=new DataView(event.data).getUint16(0,true);if(op0===5||op0===6)dbg(op0===5?'MP-031':'MP-032','native packet '+op0+' received ('+event.data.byteLength+' bytes)')}catch(_e){}routeNativePacket(event.data);return}
+      if(typeof Blob!=='undefined'&&event.data instanceof Blob){event.data.arrayBuffer().then(routeNativePacket).catch(function(e){console.error('Diggerz Blob packet',e)});return}
+      var m;try{m=JSON.parse(event.data)}catch(e){setStatus('Server sent invalid data.');return}if(!m||!m.t)return;
+      if(m.t==='server-hello'){dbg('MP-012','server hello: '+String(m.server||'unknown'));return;}
+      if(m.t==='welcome'){P.joined=true;P.room=m.room||'';dbg('MP-021','WELCOME room='+P.room+' connectionId='+(m.connectionId||'?')+' count='+(m.count||'?')+'/'+(m.max||'?'));setStatus('Connected to '+(P.mode==='pvp'?'Battle':'Dig+Trade')+' server.');return}
+      if(m.t==='player-count'){dbg('MP-022','player-count room='+(m.room||P.room||'?')+' '+m.count+'/'+m.max);if(m.count>=2&&!P.connected){P.connected=true;if(P.service&&P.service.pvpSendHello)P.service.pvpSendHello()}else if(m.count<2)P.connected=false;return}
+      if(m.t==='room-ready'){dbg('MP-023','ROOM READY room='+(m.room||P.room||'?')+' mode='+(m.mode||'?'));if(m.mode&&m.mode!==P.mode){setStatus('Server mode mismatch.');return}P.connected=true;setStatus('Native Diggerz packet link ready.');if(P.service&&P.service.pvpSendHello)P.service.pvpSendHello();if(P.service&&P.service.pvpSendNativeSpawn){P.service.pvpSendNativeSpawn();setTimeout(function(){if(P.service)P.service.pvpSendNativeSpawn()},500)}return}
+      if(m.t==='server-error'){dbg('MP-050','server-error code='+(m.code||'?')+' message='+(m.message||'?'));P.connected=false;setStatus('Multiplayer server error: '+String(m.message||m.code||'Unknown error.'));return}
+      if(m.t==='peer-left'){dbg('MP-040','peer-left');P.connected=false;if(P.service&&P.service.peerId){var svc=P.service,id=svc.peerId;svc.enqueue(3,1,function(out){out.R8(id)});svc.peerId=null;svc.peerInfo=null}if(P.service&&P.service.message)P.service.message('^1OTHER PLAYER DISCONNECTED.');if(!P.starting)setStatus('The other player left. Looking for another player…');return}
+      if(m.t==='pong')return;if(m.t==='hello')dbg('MP-030','peer hello from '+String(m.name||m._serverName||'?'));routeGameMessage(m)
     };
-    ws.onerror=function(){if(P.socket===ws&&P.requested&&!P.everOpened)setStatus('Could not reach the Diggerz multiplayer server. If you opened the downloaded HTML directly, the multiplayer server must be running locally; the hosted Render version connects automatically.')};
+    ws.onerror=function(event){dbg('MP-060','WebSocket error; state='+socketState());if(P.socket===ws&&P.requested&&!P.everOpened)setStatus('Could not reach the Diggerz multiplayer server. If you opened the downloaded HTML directly, the multiplayer server must be running locally; the hosted Render version connects automatically.')};
     ws.onclose=function(event){
       if(P.socket!==ws)return;
-      var hadOpened=P.everOpened,hadJoined=P.joined,hadMatch=P.connected,intentional=P.intentionalClose;
+      var hadOpened=P.everOpened,hadJoined=P.joined,hadMatch=P.connected,intentional=P.intentionalClose;dbg('MP-061','socket CLOSED code='+event.code+' reason='+(event.reason||'none')+' opened='+hadOpened+' joined='+hadJoined+' paired='+hadMatch);
       P.socket=null;P.connected=false;P.joined=false;P.everOpened=false;
       if(intentional||!P.requested)return;
       if(!hadOpened)setStatus('Could not reach the Diggerz multiplayer server. No match was joined.');
@@ -115259,59 +115317,64 @@ $jscomp.polyfill("Array.prototype.find", function(ca) {
     if(typeof DiggerzService==='undefined'||!DiggerzService.prototype)return false;
     var proto=DiggerzService.prototype;
     proto.guidFromParts=function(parts){return this.guid((parts&&parts[0])|0,(parts&&parts[1])|0,(parts&&parts[2])|0,(parts&&parts[3])|0)};
-    proto.pvpSend=function(m){return this.mode==='pvp'&&P.send(m)};
+    proto.pvpSend=function(m){return (this.mode==='pvp'||this.mode==='digtrade')&&P.send(m)};
     proto.pvpSendHello=function(){
-      if(this.mode!=='pvp'||!this.playerId)return;
+      if((this.mode!=='pvp'&&this.mode!=='digtrade')||!this.playerId)return;
       var p=l.z39,skin=q.player&&q.player.l9?(.45+1.1*q.player.l9/100):1.44;
       this.pvpSend({t:'hello',id:[this.playerId.P4,this.playerId.P5,this.playerId.P6,this.playerId.P7],name:this.playerName(),appearance:this.state.appearance.slice(0,11),appearanceText:this.state.appearanceText||'',x:p?p.b6/l._44:this.state.x,y:p?p.b7/l._44:this.state.y,skin:skin,mode:P.mode})
     };
-    proto.pvpSpawnPeer=function(info){
-      if(this.mode!=='pvp'||!info||!info.id)return;
-      this.peerInfo=info;this.peerId=this.guidFromParts(info.id);if(this.playerId&&this.peerId.q2(this.playerId))return;
-      var existing=this.game&&this.game.V31?this.game.V31(this.peerId):null;if(existing)return existing;if(this.peerSpawnQueued)return null;this.peerSpawnQueued=true;
-      var self=this,ap=(info.appearance||[]).slice(0,11);while(ap.length<11)ap.push(0);
-      this.enqueue(5,1,function(packet){
-        packet.R8(self.peerId);packet.R9(String(info.name||'Peer').slice(0,24));packet.r8(isFinite(info.x)?info.x:20);packet.r8(0);packet.r8(isFinite(info.y)?info.y:16);packet.r8(0);
-        packet.R2(ap.length);for(var i=0;i<ap.length;i++)packet.R2(ap[i]||0);packet.R9(info.appearanceText||'');packet.R2(0);packet.R4(0);packet.R2(0);packet.s0(false);packet.R2(1);packet.R0(0);packet.s0(false);packet.R0(0);packet.R2(0);packet.R8(self.zeroId);packet.R4(0);packet.r8(info.skin||1.44);packet.r8(1)
+    proto.pvpSendNativeSpawn=function(){
+      if((this.mode!=='pvp'&&this.mode!=='digtrade')||!this.playerId||!P.connected)return false;
+      var self=this,s=this.state,p=l.z39,ap=(s.appearance||[]).slice(0,11);while(ap.length<11)ap.push(0);
+      var packet=this.buildNativePacket(5,1,function(out){
+        var name=self.playerName();
+        out.R8(self.playerId);out.R9(name);out.r8(p?p.b6/l._44:s.x);out.r8(0);out.r8(p?p.b7/l._44:s.y);out.r8(0);
+        out.R2(ap.length);for(var i=0;i<ap.length;i++)out.R2(ap[i]||0);out.R9(s.appearanceText||'');out.R2(0);out.R4(0);out.R2(q.player&&q.player.L0||0);out.s0(false);out.R2(1);out.R0(0);out.s0(false);out.R0(0);out.R2(0);out.R8(self.zeroId);out.R4(0);
+        var skin=q.player?(.45+1.1*(q.player.l9||90)/100):1.44;out.r8(skin);out.r8(1)
       });
-      setTimeout(function(){self.peerSpawnQueued=false;if(self.peerInfo&&self.game&&self.game.V31&&!self.game.V31(self.peerId))self.pvpSpawnPeer(self.peerInfo)},700)
+      return P.sendNative(packet)
     };
-    proto.pvpApplyState=function(m){
-      if(this.mode!=='pvp')return;this.peerState=m;if(!this.peerId&&this.peerInfo)this.pvpSpawnPeer(this.peerInfo);if(!this.peerId)return;
-      var r=this.game&&this.game.V31?this.game.V31(this.peerId):null;if(!r){if(this.peerInfo)this.pvpSpawnPeer(this.peerInfo);return}
-      try{
-        r.a2=!0;r.B48=!0;r.set_alp(1);r.set_local_alp(1);r.b6=m.x;r.b7=m.y;
-        if(r.b33){var bp=r.b33.tBJ;bp.wrap_pos||bp.setupPosition();var pos=bp.wrap_pos;pos.tBJ.x=m.x;pos.tBJ.y=m.y;pos.tBJ._invalidate&&pos.tBJ._invalidate(pos.tBJ);bp.wrap_vel||bp.setupVelocity();var vel=bp.wrap_vel;vel.tBJ.x=m.vx||0;vel.tBJ.y=m.vy||0;vel.tBJ._invalidate&&vel.tBJ._invalidate(vel.tBJ)}
-        if(r.i33){r.i33.a2=!0;r.i33.set_local_alp(1);if(m.anim&&r.i33.Z28!==m.anim)try{r.i33._38(m.anim,!0,60,1)}catch(e){};if(isFinite(m.face)&&m.face!==0)try{r.i33.set_local_xScale(Math.abs(r.i33.b4||1)*(m.face<0?-1:1))}catch(e){}}
-        if(r.J30&&r.J30.p39)r.J30.p39(m.hp||0,m.max||3);
-        if(m.dead&&!this.peerDead){this.peerDead=!0;try{r.l34()}catch(e){}}
-        if(!m.dead&&this.peerDead){this.peerDead=!1;try{r.i32=oa.MODE_IDLE;r.a2=!0;r.set_alp(1);r.i33&&r.i33._38(r.I32,!0,0,1)}catch(e){}}
-      }catch(e){console.error('Diggerz MP state',e)}
+    proto.pvpReceiveNative=function(buffer){
+      if(this.mode!=='pvp'&&this.mode!=='digtrade')return;
+      var op=0;try{op=new DataView(buffer).getUint16(0,true)}catch(e){}
+      if(op===5){dbg('MP-031','packet 5 handed to native Diggerz dispatcher');}if(op===5&&!P.nativeSpawnSeen){P.nativeSpawnSeen=true;this.message('^2ORIGINAL PACKET 5 RECEIVED. ^7Remote player spawn handed to Diggerz.')}
+      if(op===6){dbg('MP-032','packet 6 handed to native Diggerz dispatcher');}if(op===6&&!P.nativeMoveSeen){P.nativeMoveSeen=true;this.message('^2ORIGINAL PACKET 6 RECEIVED. ^7Remote movement handed to Diggerz.')}
+      this.injectNativePacket(buffer)
     };
+    proto.pvpSendNativeMovement=function(){
+      if((this.mode!=='pvp'&&this.mode!=='digtrade')||!P.connected||!l.z39)return false;
+      var self=this,p=l.z39,vx=0,vy=0,anim=0,face=1;
+      try{var body=p.b33.tBJ;body.wrap_vel||body.setupVelocity();vx=body.wrap_vel.tBJ.x;vy=body.wrap_vel.tBJ.y}catch(e){}
+      try{if(p.i33){anim=p.i33._32(p.i33.Z28);if(anim<0)anim=0;face=p.i33.b4||1}}catch(e){anim=0;face=1}
+      var xt=p.b6/l._44,yt=p.b7/l._44;
+      var packet=this.buildNativePacket(6,1,function(out){
+        out.R8(self.playerId);out.r8(xt);out.r8(yt);out.r8(vx);out.r8(vy);out.r8(anim);out.r8(face);out.R2(0);out.R4(0);out.R4(0);out.R2(Math.max(0,Math.min(65535,Math.round(xt))));out.R2(Math.max(0,Math.min(65535,Math.round(yt))))
+      });
+      return P.sendNative(packet)
+    };
+    proto.pvpApplyState=function(m){/* Build 22.14 deliberately unused: movement now goes through original packet 6 -> V34 -> ai.L34. */};
     proto.pvpEchoPeerAttack=function(m){if(!this.peerId)return;var self=this;function one(tx,ty){self.enqueue(287,1,function(packet){packet.r8(m.fromX);packet.r8(m.fromY);packet.r8(tx);packet.r8(ty);packet.R0(m.attackType|0);packet.R8(self.peerId)})}if((m.attackType|0)===31){var dx=m.toX-m.fromX,dy=m.toY-m.fromY,ox=-dy*.14,oy=dx*.14;one(m.toX+ox,m.toY+oy);one(m.toX,m.toY);one(m.toX-ox,m.toY-oy)}else one(m.toX,m.toY)};
     proto.pvpReceive=function(m){
-      if(!m||this.mode!=='pvp')return;
-      if(m.t==='session'){if(m.mode&&m.mode!==P.mode)this.message('^1MODE MISMATCH: both players must use the same mode.');return}
-      if(m.t==='hello'){var first=!this.peerInfo;this.peerInfo=m;this.pvpSpawnPeer(m);if(first)this.message('^2MULTIPLAYER PEER CONNECTED: ^7'+String(m.name||'Peer'))}
-      else if(m.t==='state')this.pvpApplyState(m);
+      if(!m||(this.mode!=='pvp'&&this.mode!=='digtrade'))return;
+      if(m.t==='session'){dbg('MP-024','session message room='+(m.room||P.room||'?')+' mode='+(m.mode||'?'));if(m.mode&&m.mode!==P.mode)this.message('^1MODE MISMATCH: both players must use the same mode.');return}
+      if(m.t==='hello'){dbg('MP-030','peer hello accepted: '+String(m.name||'?'));var first=!this.peerInfo;this.peerInfo=m;this.peerId=this.guidFromParts(m.id);if(first)this.message('^2MULTIPLAYER PEER CONNECTED: ^7'+String(m.name||'Peer')+' ^0(native spawn incoming)');if(P.connected)this.pvpSendNativeSpawn()}
+      else if(m.t==='state'){}
       else if(m.t==='chat'&&this.peerId){var self=this;this.enqueue(12,1,function(p){p.R8(self.peerId);p.R9(String(m.text||'').slice(0,180))})}
       else if(m.t==='tile'){this._pvpApplyingTile=!0;try{this.setTile(m.x|0,m.y|0,m.id|0,m.variant|0)}finally{this._pvpApplyingTile=!1}}
       else if(m.t==='damage'&&P.mode==='pvp')this.hurtLocalPlayer(Math.max(1,m.amount|0),m.source||'weapon');
       else if(m.t==='attack')this.pvpEchoPeerAttack(m)
     };
     proto.pvpTick=function(){
-      if(this.mode!=='pvp'||!P.connected)return;if(!P.service)P.attach(this);if(this.ticks%3!==0||!l.z39)return;
-      var p=l.z39,vx=0,vy=0;try{var b=p.b33.tBJ;b.wrap_vel||b.setupVelocity();vx=b.wrap_vel.tBJ.x;vy=b.wrap_vel.tBJ.y}catch(e){}
-      var face=1;try{face=(p.i33&&p.i33.b4<0)?-1:1}catch(e){}
-      this.pvpSend({t:'state',x:p.b6,y:p.b7,vx:vx,vy:vy,anim:p.i33?String(p.i33.Z28||''):'',face:face,hp:this.localHealth==null?(p.N33||3):this.localHealth,max:p.N34||3,dead:!!this.localDead})
+      if((this.mode!=='pvp'&&this.mode!=='digtrade')||!P.connected)return;if(!P.service)P.attach(this);if(this.ticks%3!==0||!l.z39)return;
+      this.pvpSendNativeMovement()
     };
-    var oldA16=proto.A16;proto.A16=function(){var r=oldA16.call(this);if(this.mode==='pvp')this.pvpTick();return r};
-    var oldA12=proto.A12;proto.A12=function(){if(this.mode==='pvp')P.detach(this);return oldA12.call(this)};
+    var oldA16=proto.A16;proto.A16=function(){var r=oldA16.call(this);if(this.mode==='pvp'||this.mode==='digtrade')this.pvpTick();return r};
+    var oldA12=proto.A12;proto.A12=function(){if(this.mode==='pvp'||this.mode==='digtrade')P.detach(this);return oldA12.call(this)};
     var oldSendTest=proto.sendTestNpc;proto.sendTestNpc=function(){if(this.mode==='pvp')return;return oldSendTest.call(this)};
     var oldWorldName=proto.sendWorldName;proto.sendWorldName=function(){if(this.mode!=='pvp')return oldWorldName.call(this);var name=P.mode==='digtrade'?'Free Dig':'Battle Royale Test';this.enqueue(95,1,function(packet){packet.R9(name)})};
-    var oldSendPlayer=proto.sendPlayer;proto.sendPlayer=function(){var r=oldSendPlayer.call(this);if(this.mode==='pvp'){P.attach(this);var self=this;setTimeout(function(){self.pvpSendHello()},150);setTimeout(function(){self.pvpSendHello()},1000);setTimeout(function(){self.pvpSendHello()},2500)}return r};
-    var oldPlayerChat=proto.playerChat;proto.playerChat=function(text){var r=oldPlayerChat.call(this,text);if(this.mode==='pvp')this.pvpSend({t:'chat',text:String(text||'').slice(0,180)});return r};
-    var oldSetTile=proto.setTile;proto.setTile=function(x,y,id,variant){var r=oldSetTile.call(this,x,y,id,variant);if(r&&this.mode==='pvp'&&!this._pvpApplyingTile)this.pvpSend({t:'tile',x:x,y:y,id:id,variant:variant||0});return r};
+    var oldSendPlayer=proto.sendPlayer;proto.sendPlayer=function(){var r=oldSendPlayer.call(this);if(this.mode==='pvp'||this.mode==='digtrade'){P.attach(this);var self=this;setTimeout(function(){self.pvpSendHello()},150);setTimeout(function(){self.pvpSendHello()},1000);setTimeout(function(){self.pvpSendHello();if(P.connected)self.pvpSendNativeSpawn()},2500)}return r};
+    var oldPlayerChat=proto.playerChat;proto.playerChat=function(text){var r=oldPlayerChat.call(this,text);if(this.mode==='pvp'||this.mode==='digtrade')this.pvpSend({t:'chat',text:String(text||'').slice(0,180)});return r};
+    var oldSetTile=proto.setTile;proto.setTile=function(x,y,id,variant){var r=oldSetTile.call(this,x,y,id,variant);if(r&&(this.mode==='pvp'||this.mode==='digtrade')&&!this._pvpApplyingTile)this.pvpSend({t:'tile',x:x,y:y,id:id,variant:variant||0});return r};
     var oldDirect=proto.weaponDirectHit;proto.weaponDirectHit=function(fromX,fromY,toX,toY,attackType){
       if(this.mode==='pvp'&&P.mode==='pvp'&&this.peerState&&!this.peerState.dead){var px=this.peerState.x/l._44,py=this.peerState.y/l._44,vx=toX-fromX,vy=toY-fromY,vv=vx*vx+vy*vy,t=vv>0?((px-fromX)*vx+(py-fromY)*vy)/vv:0;t=Math.max(0,Math.min(1,t));var cx=fromX+vx*t,cy=fromY+vy*t;if(Math.hypot(px-cx,py-cy)<=.9)this.pvpSend({t:'damage',amount:1,source:'weapon'})}
       return oldDirect.call(this,fromX,fromY,toX,toY,attackType)
@@ -115338,11 +115401,12 @@ $jscomp.polyfill("Array.prototype.find", function(ca) {
     try{
       prepareMenu();
       q.player.l7=!1;
-      l.A45=!1;l.A46=!0;l.A47=!1;l.A48=!1;l.A40=null;
-      q.diggerzPvpRequested=!0;
+      l.A45=!1;l.A46=(P.mode==='digtrade');l.A47=!1;l.A48=!1;l.A40=null;
+      q.diggerzPvpRequested=(P.mode==='pvp');
       q.diggerzPeerMode=P.mode;
-      q.diggerzDigTradeRequested=!1;
+      q.diggerzDigTradeRequested=(P.mode==='digtrade');
       q.diggerzShopRequested=!1;
+      dbg('MP-005','launch flags mode='+P.mode+' A46='+l.A46+' pvpRequested='+q.diggerzPvpRequested+' digTradeRequested='+q.diggerzDigTradeRequested);
       q.mClicked=!1;
       // Follow the same proven title-screen transition used by Build 21.17.
       P.menu._1='clicked';
