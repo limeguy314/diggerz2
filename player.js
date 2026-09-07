@@ -22,8 +22,8 @@ function createPlayer(name) {
   for (let i = 0; i < 30; i++) slots.push(emptyItem());
   slots[0] = item(2, 326, 1, 1, 0, '');
   slots[1] = item(2, 240, 0, 1, 0, '');
-  slots[2] = item(1, 100, 0, 24, 0, '');
-  slots[3] = item(1, 108, 0, 40, 0, '');
+  slots[2] = item(1, 100, 0, 64, 0, '');
+  slots[3] = item(1, 108, 0, 64, 0, '');
 
   return {
     id: randomGuid(),
@@ -40,10 +40,9 @@ function createPlayer(name) {
     coins: 0,
     hp: 3,
     maxHp: 3,
+    selectedSlot: 1,
     ws: null,
     ready: false,
-    identityReceived: false,
-    profileReceived: false,
   };
 }
 

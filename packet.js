@@ -1,10 +1,5 @@
 'use strict';
 
-/**
- * Binary packet codec matching the recovered diggerz client (`tb` class).
- * All multi-byte integers are little-endian.
- */
-
 class Packet {
   constructor(size = 256) {
     this.buf = Buffer.alloc(size);
@@ -38,9 +33,7 @@ class Packet {
     this.length = Math.max(this.length, this.offset);
   }
 
-  R1(v) {
-    this.R0(v);
-  }
+  R1(v) { this.R0(v); }
 
   R2(v) {
     this.ensure(2);
@@ -77,9 +70,7 @@ class Packet {
     this.R0(frac);
   }
 
-  s0(bool) {
-    this.R4(bool ? 1 : 0);
-  }
+  s0(bool) { this.R4(bool ? 1 : 0); }
 
   Q7() {
     if (this.offset + 4 > this.length) return 0;
@@ -100,9 +91,7 @@ class Packet {
     return this.buf[this.offset++];
   }
 
-  r6() {
-    return this.r1() !== 0;
-  }
+  r6() { return this.r1() !== 0; }
 
   Q4() {
     const a = this.Q7();

@@ -1,11 +1,10 @@
 services:
   - type: web
-    name: diggerz
+    name: diggerz2
     runtime: node
     plan: free
     buildCommand: npm install
-    startCommand: npm start
-    healthCheckPath: /health
+    startCommand: node index.js
     envVars:
       - key: NODE_VERSION
         value: "20"

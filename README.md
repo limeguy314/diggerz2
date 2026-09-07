@@ -1,20 +1,24 @@
 # diggerz2
 
-Client **build 22.11** + Node fight server.
+Self-hosted diggerz.io rebuild (client build **22.14**).
 
-## Server fixes
-- Fight connect: identity packet (name + **skin tone**)
-- **Offline Free Dig items/appearance** via opcode 199 (needs updated index.html inject)
-- **Mining** — 2-swing break, better tile targeting
-- Peers + shared terrain + weapons
-
-## Deploy
-1. Ensure `room.js` / `player.js` / `index.js` are latest on main
-2. Upload latest **index.html** from release zip (profile inject is in the client)
-3. Render → Manual Deploy
-
-## Local
+## Run locally
 ```bash
-npm install && npm start
+npm install
+node index.js
+# open http://localhost:10000
 ```
-Open http://localhost:10000/
+
+## Render
+Connect this repo → Web Service → Start command: `node index.js`
+
+## Modes
+| URL | Mode |
+|-----|------|
+| `/` | Online (this server) |
+| `/?local=1` | Offline Dig+Trade |
+
+## Features (phase 1)
+- Connect to this host only (no dead lobby servers)
+- Shared world, movement, dig, place, inventory, chat bubbles
+- `/name YourName` in chat

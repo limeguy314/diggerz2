@@ -1,7 +1,7 @@
 {
-  "name": "diggerz-server",
-  "version": "0.1.0",
-  "description": "diggerz client + WebSocket server (flat layout)",
+  "name": "diggerz2",
+  "version": "1.0.0",
+  "private": true,
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -11,6 +11,5 @@
   },
   "dependencies": {
     "ws": "^8.18.0"
-  },
-  "license": "MIT"
+  }
 }
